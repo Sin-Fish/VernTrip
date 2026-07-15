@@ -1,0 +1,17 @@
+ALTER TABLE qa_session
+    ADD COLUMN IF NOT EXISTS title TEXT,
+    ADD COLUMN IF NOT EXISTS summary TEXT,
+    ADD COLUMN IF NOT EXISTS messages_json TEXT,
+    ADD COLUMN IF NOT EXISTS archived BOOLEAN NOT NULL DEFAULT FALSE,
+    ADD COLUMN IF NOT EXISTS show_evidence BOOLEAN NOT NULL DEFAULT TRUE,
+    ADD COLUMN IF NOT EXISTS show_sources BOOLEAN NOT NULL DEFAULT TRUE,
+    ADD COLUMN IF NOT EXISTS show_page_numbers BOOLEAN NOT NULL DEFAULT TRUE;
+
+ALTER TABLE qa_evidence
+    ADD COLUMN IF NOT EXISTS message_id VARCHAR(120);
+
+UPDATE qa_session
+SET title = COALESCE(title, question)
+WHERE title IS NULL;
+
+CREATE INDEX IF NOT EXISTS idx_qa_session_updated_at ON qa_session(updated_at DESC);

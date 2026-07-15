@@ -1,0 +1,8 @@
+ALTER TABLE workbench_run
+    ADD COLUMN IF NOT EXISTS tool_chain VARCHAR(255) NOT NULL DEFAULT '';
+
+ALTER TABLE workbench_run
+    ADD COLUMN IF NOT EXISTS plan_summary TEXT NOT NULL DEFAULT '';
+
+ALTER TABLE workbench_run
+    ADD COLUMN IF NOT EXISTS plan_json TEXT NOT NULL DEFAULT '{}';

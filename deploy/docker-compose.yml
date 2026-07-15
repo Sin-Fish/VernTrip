@@ -1,0 +1,53 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: vernflow-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: vernflow
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks:
+      - vernflow-network
+
+  ai-service:
+    build: ../vernflow-ai
+    container_name: vernflow-ai-service
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    networks:
+      - vernflow-network
+
+  backend:
+    build: ../vernflow-backend
+    container_name: vernflow-backend
+    restart: unless-stopped
+    depends_on:
+      - postgres
+      - ai-service
+    environment:
+      SERVER_PORT: 8080
+      DB_URL: jdbc:postgresql://postgres:5432/vernflow
+      DB_USERNAME: postgres
+      DB_PASSWORD: postgres
+      DB_DRIVER: org.postgresql.Driver
+      AI_SERVICE_BASE_URL: http://ai-service:8000
+      PAPER_UPLOAD_DIR: /app/storage/papers
+    ports:
+      - "8080:8080"
+    networks:
+      - vernflow-network
+
+networks:
+  vernflow-network:
+    driver: bridge
+
+volumes:
+  pgdata:

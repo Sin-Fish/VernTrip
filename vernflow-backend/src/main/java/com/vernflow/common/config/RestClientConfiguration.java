@@ -1,0 +1,37 @@
+package com.vernflow.common.config;
+
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
+import org.springframework.web.client.RestClient;
+
+/**
+ * Backend-side HTTP clients for rag and agent services.
+ */
+@Configuration
+public class RestClientConfiguration {
+
+    @Bean
+    @Qualifier("ragServiceRestClient")
+    public RestClient ragServiceRestClient(RagServiceProperties properties) {
+        return buildRestClient(properties.baseUrl().toString(), properties.timeout().toMillis());
+    }
+
+    @Bean
+    @Qualifier("agentServiceRestClient")
+    public RestClient agentServiceRestClient(AgentServiceProperties properties) {
+        return buildRestClient(properties.baseUrl().toString(), properties.timeout().toMillis());
+    }
+
+    private RestClient buildRestClient(String baseUrl, long timeoutMillis) {
+        SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
+        int timeout = Math.toIntExact(timeoutMillis);
+        requestFactory.setConnectTimeout(timeout);
+        requestFactory.setReadTimeout(timeout);
+        return RestClient.builder()
+                .baseUrl(baseUrl)
+                .requestFactory(requestFactory)
+                .build();
+    }
+}
