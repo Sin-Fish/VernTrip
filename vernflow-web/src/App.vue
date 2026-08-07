@@ -4,6 +4,7 @@ import { useRoute, useRouter } from "vue-router";
 import AppSidebar from "@/components/AppSidebar.vue";
 import AppTopbar from "@/components/AppTopbar.vue";
 import SkillConfigModal from "@/components/SkillConfigModal.vue";
+import TourismHeader from "@/features/tourism/components/AppHeader.vue";
 import { useAppState } from "@/composables/useAppState";
 import { useUserAuth } from "@/composables/useUserAuth";
 import { syncWorkspaceFinderAuth } from "@/lib/workspaceFinder";
@@ -15,7 +16,8 @@ const { currentUser, hydrateUserProfile, signOutUser } = useUserAuth();
 
 const pageTitle = computed(() => route.meta.title ?? "VernFlow");
 const pageDescription = computed(() => route.meta.description ?? "");
-const showShell = computed(() => !route.meta.public);
+const showShell = computed(() => !route.meta.public && !route.meta.merchantShell);
+const showTourismShell = computed(() => Boolean(route.meta.tourismShell));
 
 function goTo(page) {
   if (!page) {
@@ -54,7 +56,7 @@ onMounted(async () => {
 watch(
   () => route.name,
   async (nextRoute, previousRoute) => {
-    if (route.meta.public) {
+    if (route.meta.public || route.meta.merchantShell) {
       return;
     }
 
@@ -71,7 +73,13 @@ watch(
 </script>
 
 <template>
-  <RouterView v-if="!showShell" />
+  <div
+    v-if="!showShell"
+    :class="{ 'tourism-site': showTourismShell }"
+  >
+    <TourismHeader v-if="showTourismShell" />
+    <RouterView />
+  </div>
   <div
     v-else
     class="app"

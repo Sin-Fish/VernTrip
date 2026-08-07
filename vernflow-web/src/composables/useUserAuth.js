@@ -25,6 +25,7 @@ function normalizeProfile(profile) {
       : typeof profile.username === "string" && profile.username
         ? profile.username
         : "\u6f14\u793a\u7528\u6237",
+    role: typeof profile.role === "string" ? profile.role.toUpperCase() : "TOURIST",
     expiresAt: typeof profile.expiresAt === "string" ? profile.expiresAt : null,
   };
 }

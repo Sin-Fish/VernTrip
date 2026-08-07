@@ -114,5 +114,12 @@ __pycache__/
 build-codex/
 vernflow-backend/build-codex/
 
+# OpenClaw runtime artifacts and local state
+/openclaw-runtime/plugin/dist/
+/openclaw-runtime/plugin/node_modules/
+/openclaw-runtime/plugin/*.tgz
+/openclaw-runtime/state/
+/openclaw-runtime/host/node_modules/
+
 # Office temporary lock files
 ~$*.docx

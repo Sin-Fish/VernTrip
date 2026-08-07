@@ -24,9 +24,18 @@ public class RestClientConfiguration {
         return buildRestClient(properties.baseUrl().toString(), properties.timeout().toMillis());
     }
 
+    @Bean
+    @Qualifier("openClawRestClient")
+    public RestClient openClawRestClient(OpenClawProperties properties) {
+        return buildRestClient(
+                properties.baseUrl().toString(),
+                properties.effectiveShadowTimeout().toMillis()
+        );
+    }
+
     private RestClient buildRestClient(String baseUrl, long timeoutMillis) {
         SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
-        int timeout = Math.toIntExact(timeoutMillis);
+        int timeout = Math.toIntExact(Math.min(timeoutMillis, Integer.MAX_VALUE));
         requestFactory.setConnectTimeout(timeout);
         requestFactory.setReadTimeout(timeout);
         return RestClient.builder()

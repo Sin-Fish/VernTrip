@@ -31,4 +31,19 @@ public class AsyncConfiguration {
         executor.initialize();
         return executor;
     }
+
+    /**
+     * Keeps shadow traffic isolated from request threads and document parsing.
+     */
+    @Bean(name = "openClawShadowTaskExecutor")
+    public Executor openClawShadowTaskExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setThreadNamePrefix("openclaw-shadow-");
+        executor.setCorePoolSize(1);
+        executor.setMaxPoolSize(2);
+        executor.setQueueCapacity(64);
+        executor.setWaitForTasksToCompleteOnShutdown(false);
+        executor.initialize();
+        return executor;
+    }
 }

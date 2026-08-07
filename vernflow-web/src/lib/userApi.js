@@ -1,4 +1,5 @@
 const USER_TOKEN_KEY = "vernflow.user.token";
+const USER_ROLE_KEY = "vernflow.user.role";
 
 export function getUserToken() {
   return window.localStorage.getItem(USER_TOKEN_KEY) ?? "";
@@ -12,8 +13,21 @@ export function setUserToken(token) {
   window.localStorage.removeItem(USER_TOKEN_KEY);
 }
 
+export function getUserRole() {
+  return window.localStorage.getItem(USER_ROLE_KEY) ?? "";
+}
+
+export function setUserRole(role) {
+  if (role) {
+    window.localStorage.setItem(USER_ROLE_KEY, String(role).toUpperCase());
+    return;
+  }
+  window.localStorage.removeItem(USER_ROLE_KEY);
+}
+
 export function clearUserToken() {
   window.localStorage.removeItem(USER_TOKEN_KEY);
+  window.localStorage.removeItem(USER_ROLE_KEY);
 }
 
 export function hasUserToken() {
@@ -70,6 +84,7 @@ export async function loginUser(username, password) {
     body: JSON.stringify({ username, password }),
   });
   setUserToken(data.token);
+  setUserRole(data.role);
   return data;
 }
 

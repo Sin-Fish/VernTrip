@@ -1,0 +1,53 @@
+{
+  "id": "verntrip",
+  "name": "VernTrip Runtime",
+  "description": "Connects OpenClaw to VernTrip workspace and tourism capabilities.",
+  "version": "0.1.0",
+  "contracts": {
+    "tools": [
+      "verntrip_runtime_status",
+      "verntrip_workspace_scope_read",
+      "verntrip_tourism_catalog_read"
+    ]
+  },
+  "activation": {
+    "onStartup": true
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "backendBaseUrl": {
+        "type": "string",
+        "format": "uri",
+        "default": "http://backend:8080",
+        "description": "Internal VernTrip backend base URL."
+      },
+      "requestTimeoutMs": {
+        "type": "integer",
+        "minimum": 1000,
+        "maximum": 180000,
+        "default": 30000,
+        "description": "Timeout for calls from the plugin to VernTrip."
+      },
+      "serviceTokenEnv": {
+        "type": "string",
+        "pattern": "^[A-Z][A-Z0-9_]*$",
+        "default": "VERNTRIP_OPENCLAW_SERVICE_TOKEN",
+        "description": "Environment variable that holds the internal service token."
+      }
+    }
+  },
+  "uiHints": {
+    "backendBaseUrl": {
+      "label": "VernTrip backend URL",
+      "placeholder": "http://backend:8080"
+    },
+    "requestTimeoutMs": {
+      "label": "Request timeout (ms)"
+    },
+    "serviceTokenEnv": {
+      "label": "Service token environment variable"
+    }
+  }
+}

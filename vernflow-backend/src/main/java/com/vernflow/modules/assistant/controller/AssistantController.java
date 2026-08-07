@@ -5,6 +5,7 @@ import com.vernflow.modules.assistant.dto.AssistantAskRequest;
 import com.vernflow.modules.assistant.dto.AssistantSessionDetailResponse;
 import com.vernflow.modules.assistant.dto.AssistantSessionSummaryResponse;
 import com.vernflow.modules.assistant.service.WorkspaceAssistantService;
+import com.vernflow.modules.openclaw.service.OpenClawShadowDispatcher;
 import com.vernflow.modules.user.service.UserAuthService;
 
 import jakarta.servlet.http.HttpServletRequest;
@@ -27,13 +28,16 @@ public class AssistantController {
 
     private final WorkspaceAssistantService workspaceAssistantService;
     private final UserAuthService userAuthService;
+    private final OpenClawShadowDispatcher openClawShadowDispatcher;
 
     public AssistantController(
             WorkspaceAssistantService workspaceAssistantService,
-            UserAuthService userAuthService
+            UserAuthService userAuthService,
+            OpenClawShadowDispatcher openClawShadowDispatcher
     ) {
         this.workspaceAssistantService = workspaceAssistantService;
         this.userAuthService = userAuthService;
+        this.openClawShadowDispatcher = openClawShadowDispatcher;
     }
 
     /**
@@ -74,10 +78,10 @@ public class AssistantController {
             HttpServletRequest servletRequest,
             @RequestBody AssistantAskRequest request
     ) {
-        return ApiResponse.success(workspaceAssistantService.ask(
-                userAuthService.currentUserId(servletRequest),
-                request
-        ));
+        Long userId = userAuthService.currentUserId(servletRequest);
+        AssistantSessionDetailResponse response = workspaceAssistantService.ask(userId, request);
+        openClawShadowDispatcher.submit(userId, request, response);
+        return ApiResponse.success(response);
     }
 
     @DeleteMapping("/sessions/{sessionId}")

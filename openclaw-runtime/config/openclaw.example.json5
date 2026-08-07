@@ -1,0 +1,65 @@
+{
+  gateway: {
+    mode: "local",
+    bind: "lan",
+    auth: {
+      mode: "token",
+      token: "${OPENCLAW_GATEWAY_TOKEN}",
+    },
+    http: {
+      endpoints: {
+        responses: {
+          enabled: true,
+          files: {
+            allowUrl: false,
+          },
+          images: {
+            allowUrl: false,
+          },
+        },
+      },
+    },
+  },
+  plugins: {
+    allow: ["verntrip"],
+    entries: {
+      verntrip: {
+        enabled: true,
+        config: {
+          backendBaseUrl: "http://backend:8080",
+          requestTimeoutMs: 30000,
+          serviceTokenEnv: "VERNTRIP_OPENCLAW_SERVICE_TOKEN",
+        },
+      },
+    },
+  },
+  skills: {
+    load: {
+      extraDirs: ["/opt/verntrip/skills"],
+      watch: true,
+    },
+    entries: {
+      "verntrip-foundation": {
+        enabled: true,
+      },
+    },
+  },
+  agents: {
+    defaults: {
+      skills: ["verntrip-foundation"],
+      tools: {
+        allow: ["verntrip"],
+      },
+    },
+    list: [
+      {
+        id: "verntrip-main",
+        name: "VernTrip Main Agent",
+        skills: ["verntrip-foundation"],
+        tools: {
+          allow: ["verntrip"],
+        },
+      },
+    ],
+  },
+}

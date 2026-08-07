@@ -1,0 +1,54 @@
+@import url('https://fonts.googleapis.com/css2?family=Ma+Shan+Zheng&family=Zhi+Mang+Xing&family=Noto+Serif+SC:wght@300;400;500;600;700;900&display=swap');
+
+:root{
+  /* 山水灵 · 新版配色：宣纸 + 黛青 + 朱砂 + 墨色 */
+  --paper:#F4EDDA;
+  --paper-light:#F0E6CF;
+  --paper-deep:#E8DCC0;
+
+  --ink:#2D302D;
+  --ink-soft:#77736B;
+  --ink-light:#A09B92;
+
+  --teal:#315B5A;
+  --teal-deep:#244746;
+
+  --cinnabar:#B74736;
+  --cinnabar-light:#C86A56;
+
+  --gold:#C69C5A;
+  --gold-deep:#AD8345;
+
+  --umber:#A96F45;
+  --umber-light:#BE8B64;
+
+  /* 旧变量别名，兼容已有代码 */
+  --terracotta:#B74736;
+  --terracotta-deep:#933A2C;
+  --cream:#F4EDDA;
+  --cream-soft:#F4EDDA;
+  --sage:#315B5A;
+  --sage-deep:#244746;
+  --dusty-blue:#315B5A;
+  --dusty-blue-deep:#244746;
+  --seal-red:#B74736;
+}
+
+*{ box-sizing:border-box; margin:0; padding:0; }
+
+html, body, #app{
+  width:100%;
+  min-height:100%;
+}
+
+body{
+  background:var(--paper);
+  color:var(--ink);
+  font-family:'Noto Serif SC', serif;
+  overflow-x:hidden;
+}
+
+/* 全站通用：草书标题字体 */
+.font-brush{
+  font-family:'Zhi Mang Xing', cursive;
+}

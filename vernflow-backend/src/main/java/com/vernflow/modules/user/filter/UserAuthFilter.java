@@ -23,7 +23,18 @@ public class UserAuthFilter extends OncePerRequestFilter {
             "/api/workspace",
             "/api/finder",
             "/api/assistant",
+            "/api/workbench",
+            "/api/merchant"
+    );
+
+    private static final List<String> INTERNAL_PREFIXES = List.of(
+            "/api/workspace",
+            "/api/finder",
             "/api/workbench"
+    );
+
+    private static final List<String> MERCHANT_PREFIXES = List.of(
+            "/api/merchant"
     );
 
     private final UserAuthProperties userAuthProperties;
@@ -78,9 +89,29 @@ public class UserAuthFilter extends OncePerRequestFilter {
             return;
         }
 
+        String path = request.getRequestURI();
+        boolean internalOnly = path != null && INTERNAL_PREFIXES.stream().anyMatch(path::startsWith);
+        if (internalOnly && !"INTERNAL".equals(session.role())) {
+            response.setStatus(HttpServletResponse.SC_FORBIDDEN);
+            response.setContentType(MediaType.APPLICATION_JSON_VALUE);
+            response.getWriter().write(objectMapper.writeValueAsString(ApiResponse.failure("当前账号无权访问内部工作区。")));
+            return;
+        }
+
+        boolean merchantOnly = path != null && MERCHANT_PREFIXES.stream().anyMatch(path::startsWith);
+        if (merchantOnly && !"MERCHANT".equals(session.role())) {
+            response.setStatus(HttpServletResponse.SC_FORBIDDEN);
+            response.setContentType(MediaType.APPLICATION_JSON_VALUE);
+            response.getWriter().write(objectMapper.writeValueAsString(
+                    ApiResponse.failure("当前账号无权访问商家工作台。")
+            ));
+            return;
+        }
+
         request.setAttribute(UserAuthService.REQUEST_ATTR_USER_ID, session.userId());
         request.setAttribute(UserAuthService.REQUEST_ATTR_USERNAME, session.username());
         request.setAttribute(UserAuthService.REQUEST_ATTR_DISPLAY_NAME, session.displayName());
+        request.setAttribute(UserAuthService.REQUEST_ATTR_ROLE, session.role());
         request.setAttribute(UserAuthService.REQUEST_ATTR_EXPIRES_AT, session.expiresAt());
         filterChain.doFilter(request, response);
     }

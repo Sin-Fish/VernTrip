@@ -6,6 +6,7 @@ public record UserProfileResponse(
         Long id,
         String username,
         String displayName,
+        String role,
         LocalDateTime expiresAt
 ) {
 }

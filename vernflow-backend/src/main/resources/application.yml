@@ -50,6 +50,18 @@ app:
   user:
     session-ttl: ${USER_SESSION_TTL:12h}
     auth-required: ${USER_AUTH_REQUIRED:true}
+  openclaw:
+    engine: ${ASSISTANT_ENGINE:legacy}
+    base-url: ${OPENCLAW_BASE_URL:http://127.0.0.1:18789}
+    gateway-token: ${OPENCLAW_GATEWAY_TOKEN:}
+    agent-id: ${OPENCLAW_AGENT_ID:verntrip-main}
+    timeout: ${OPENCLAW_TIMEOUT:180s}
+    service-token: ${VERNTRIP_OPENCLAW_SERVICE_TOKEN:}
+    session-context-ttl: ${OPENCLAW_SESSION_CONTEXT_TTL:30m}
+    shadow-sample-rate: ${OPENCLAW_SHADOW_SAMPLE_RATE:1.0}
+    shadow-timeout: ${OPENCLAW_SHADOW_TIMEOUT:60s}
+    shadow-max-output-tokens: ${OPENCLAW_SHADOW_MAX_OUTPUT_TOKENS:2400}
+    shadow-max-stored-chars: ${OPENCLAW_SHADOW_MAX_STORED_CHARS:12000}
   rag:
     default-profile: ${RAG_PROFILE:tfidf_topk_basic}
   rag-store:

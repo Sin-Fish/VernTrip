@@ -1,0 +1,49 @@
+@import url("https://fonts.googleapis.com/css2?family=Ma+Shan+Zheng&family=Zhi+Mang+Xing&family=Noto+Serif+SC:wght@300;400;500;600;700;900&display=swap");
+
+.tourism-site {
+  --paper: #f4edda;
+  --paper-light: #f0e6cf;
+  --paper-deep: #e8dcc0;
+  --ink: #2d302d;
+  --ink-soft: #77736b;
+  --ink-light: #a09b92;
+  --teal: #315b5a;
+  --teal-deep: #244746;
+  --cinnabar: #b74736;
+  --cinnabar-light: #c86a56;
+  --gold: #c69c5a;
+  --gold-deep: #ad8345;
+  --umber: #a96f45;
+  --umber-light: #be8b64;
+  --terracotta: #b74736;
+  --terracotta-deep: #933a2c;
+  --cream: #f4edda;
+  --cream-soft: #f4edda;
+  --sage: #315b5a;
+  --sage-deep: #244746;
+  --dusty-blue: #315b5a;
+  --dusty-blue-deep: #244746;
+  --seal-red: #b74736;
+  width: 100%;
+  min-height: 100vh;
+  overflow-x: hidden;
+  color: var(--ink);
+  background: var(--paper);
+  font-family: "Noto Serif SC", "Songti SC", "STSong", serif;
+}
+
+.tourism-site *,
+.tourism-site *::before,
+.tourism-site *::after {
+  box-sizing: border-box;
+}
+
+.tourism-site .font-brush {
+  font-family: "Zhi Mang Xing", "Ma Shan Zheng", "STKaiti", cursive;
+}
+
+@media (max-width: 760px) {
+  .tourism-site {
+    min-height: 100dvh;
+  }
+}

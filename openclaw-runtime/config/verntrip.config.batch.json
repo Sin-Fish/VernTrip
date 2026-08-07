@@ -1,0 +1,70 @@
+[
+  {
+    "path": "gateway.mode",
+    "value": "local"
+  },
+  {
+    "path": "gateway.bind",
+    "value": "lan"
+  },
+  {
+    "path": "gateway.controlUi.allowedOrigins",
+    "value": [
+      "http://localhost:18789",
+      "http://127.0.0.1:18789"
+    ]
+  },
+  {
+    "path": "gateway.http.endpoints.responses.enabled",
+    "value": true
+  },
+  {
+    "path": "gateway.http.endpoints.responses.files.allowUrl",
+    "value": false
+  },
+  {
+    "path": "gateway.http.endpoints.responses.images.allowUrl",
+    "value": false
+  },
+  {
+    "path": "plugins.allow",
+    "value": [
+      "verntrip"
+    ]
+  },
+  {
+    "path": "plugins.entries.verntrip",
+    "value": {
+      "enabled": true,
+      "config": {
+        "backendBaseUrl": "http://backend:8080",
+        "requestTimeoutMs": 30000,
+        "serviceTokenEnv": "VERNTRIP_OPENCLAW_SERVICE_TOKEN"
+      }
+    }
+  },
+  {
+    "path": "skills.load.extraDirs",
+    "value": [
+      "/opt/verntrip/skills"
+    ]
+  },
+  {
+    "path": "skills.entries[\"verntrip-foundation\"]",
+    "value": {
+      "enabled": true
+    }
+  },
+  {
+    "path": "agents.defaults.skills",
+    "value": [
+      "verntrip-foundation"
+    ]
+  },
+  {
+    "path": "agents.defaults.tools.allow",
+    "value": [
+      "verntrip"
+    ]
+  }
+]

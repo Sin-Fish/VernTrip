@@ -1,0 +1,360 @@
+<template>
+  <div class="home-stage" @wheel="handleWheel">
+    <Transition name="scene-dissolve" mode="out-in">
+      <section
+        v-if="scene === 'hero'"
+        key="hero"
+        class="scene-panel hero-scene"
+        @click="handleHeroClick"
+      >
+        <img src="/images/hero-full.jpg" alt="山水云雾" class="hero-bg" />
+        <div class="hero-wash"></div>
+        <div class="hero-overlay">
+          <HeroSection @explore="showExplore" />
+        </div>
+        <FeatureStrip class="feature-strip" />
+        <button class="scene-switch" type="button" @click.stop="showExplore">
+          <span>点击画面 · 看旅行灵感</span>
+          <i aria-hidden="true"></i>
+        </button>
+      </section>
+
+      <section v-else key="explore" ref="explorePanel" class="scene-panel inspiration-scene">
+        <img src="/images/explorenew2.jpg" alt="" class="inspiration-bg" />
+        <div class="inspiration-wash"></div>
+
+        <header class="inspiration-heading">
+          <button class="return-button" type="button" @click="showHero">← 返回首页</button>
+          <div>
+            <span class="eyebrow">TRAVEL INSPIRATION</span>
+            <h2>从一处风景，开始想象旅程</h2>
+            <p>浏览当季路线与地方体验，找到喜欢的方向后交给 AI 继续规划。</p>
+          </div>
+          <RouterLink class="planner-link" :to="{ name: 'travel-planner' }">开始规划</RouterLink>
+        </header>
+
+        <div class="explore-body">
+          <main class="explore-main">
+            <HeroCarousel :slides="banners" />
+          </main>
+          <aside class="explore-sidebar">
+            <MountainCard />
+          </aside>
+        </div>
+        <AITravelogue />
+      </section>
+    </Transition>
+  </div>
+</template>
+
+<script setup>
+import { onMounted, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import AITravelogue from '../components/AITravelogue.vue'
+import FeatureStrip from '../components/FeatureStrip.vue'
+import HeroCarousel from '../components/HeroCarousel.vue'
+import HeroSection from '../components/HeroSection.vue'
+import MountainCard from '../components/MountainCard.vue'
+
+const route = useRoute()
+const router = useRouter()
+const explorePanel = ref(null)
+const scene = ref(route.query.scene === 'explore' ? 'explore' : 'hero')
+let wheelLocked = false
+
+const banners = [
+  '/images/banner1.jpg',
+  '/images/banner2.jpg',
+  '/images/banner3.jpg',
+  '/images/banner4.jpg',
+  '/images/banner5.jpg',
+]
+
+function setScene(nextScene) {
+  if (scene.value === nextScene) return
+  scene.value = nextScene
+  const query = { ...route.query }
+  if (nextScene === 'explore') query.scene = 'explore'
+  else delete query.scene
+  router.replace({ name: 'travel-home', query })
+}
+
+function showExplore() {
+  setScene('explore')
+}
+
+function showHero() {
+  setScene('hero')
+}
+
+function handleHeroClick(event) {
+  if (event.target.closest('button, input, a')) return
+  showExplore()
+}
+
+function handleWheel(event) {
+  if (wheelLocked || Math.abs(event.deltaY) < 28) return
+  if (scene.value === 'hero' && event.deltaY > 0) {
+    wheelLocked = true
+    showExplore()
+  } else if (
+    scene.value === 'explore'
+    && event.deltaY < 0
+    && (explorePanel.value?.scrollTop || 0) <= 0
+  ) {
+    wheelLocked = true
+    showHero()
+  } else {
+    return
+  }
+  window.setTimeout(() => { wheelLocked = false }, 850)
+}
+
+watch(
+  () => route.query.scene,
+  (value) => {
+    scene.value = value === 'explore' ? 'explore' : 'hero'
+  },
+)
+
+onMounted(() => {
+  scene.value = route.query.scene === 'explore' ? 'explore' : 'hero'
+})
+</script>
+
+<style scoped>
+.home-stage {
+  position: relative;
+  isolation: isolate;
+  height: calc(100vh - 77px);
+  min-height: 620px;
+  overflow: hidden;
+  background: #e9e2d4;
+}
+
+.scene-panel {
+  position: absolute;
+  inset: 0;
+}
+
+.hero-scene {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  cursor: pointer;
+}
+
+.hero-bg,
+.inspiration-bg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.hero-bg {
+  object-position: top center;
+  animation: hero-arrive 1.3s ease-out both;
+}
+
+.hero-wash {
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(90deg, rgba(239, 233, 218, .8) 0%, rgba(239, 233, 218, .34) 43%, transparent 72%),
+    linear-gradient(0deg, rgba(235, 228, 212, .42), transparent 38%);
+}
+
+.hero-overlay {
+  position: relative;
+  z-index: 2;
+  width: min(1360px, 100%);
+  margin: 0 auto;
+  padding: clamp(45px, 7vh, 82px) 56px 30px;
+  cursor: default;
+}
+
+.feature-strip {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 2;
+  cursor: default;
+}
+
+.scene-switch {
+  position: absolute;
+  right: 46px;
+  bottom: 118px;
+  z-index: 4;
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  border: 0;
+  background: transparent;
+  color: rgba(44, 36, 27, .72);
+  cursor: pointer;
+  font-family: 'Noto Serif SC', serif;
+  font-size: 11px;
+  letter-spacing: 2px;
+}
+
+.scene-switch i {
+  width: 1px;
+  height: 34px;
+  background: linear-gradient(var(--teal), transparent);
+  animation: guide-pulse 1.8s ease-in-out infinite;
+}
+
+.inspiration-scene {
+  overflow-x: hidden;
+  overflow-y: auto;
+  background: #f1eadc;
+}
+
+.inspiration-bg {
+  position: fixed;
+  top: 77px;
+  height: calc(100vh - 77px);
+  object-position: top center;
+}
+
+.inspiration-wash {
+  position: fixed;
+  inset: 77px 0 0;
+  background: linear-gradient(180deg, rgba(243, 237, 224, .2), rgba(243, 237, 224, .82) 72%, #f3ede2 100%);
+  pointer-events: none;
+}
+
+.inspiration-heading,
+.explore-body,
+.inspiration-scene :deep(.travelogue-section) {
+  position: relative;
+  z-index: 1;
+}
+
+.inspiration-heading {
+  display: grid;
+  grid-template-columns: 150px minmax(0, 1fr) 150px;
+  align-items: center;
+  gap: 24px;
+  width: min(1420px, calc(100% - 64px));
+  margin: 0 auto;
+  padding: 32px 0 22px;
+}
+
+.inspiration-heading > div {
+  text-align: center;
+}
+
+.eyebrow {
+  color: var(--teal);
+  font-size: 10px;
+  letter-spacing: 4px;
+}
+
+.inspiration-heading h2 {
+  margin: 5px 0 7px;
+  color: var(--ink);
+  font-family: 'Noto Serif SC', serif;
+  font-size: clamp(25px, 3vw, 38px);
+  font-weight: 600;
+  letter-spacing: 3px;
+}
+
+.inspiration-heading p {
+  color: var(--ink-soft);
+  font-size: 12px;
+  letter-spacing: .6px;
+}
+
+.return-button,
+.planner-link {
+  justify-self: start;
+  padding: 9px 17px;
+  border: 1px solid rgba(44, 36, 27, .18);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, .24);
+  color: var(--ink);
+  cursor: pointer;
+  font-family: 'Noto Serif SC', serif;
+  font-size: 12px;
+  letter-spacing: 1px;
+  text-decoration: none;
+  backdrop-filter: blur(8px);
+}
+
+.planner-link {
+  justify-self: end;
+  border-color: var(--teal);
+  background: var(--teal);
+  color: #f8f3e9;
+}
+
+.explore-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1.55fr) minmax(320px, 1fr);
+  align-items: stretch;
+  gap: 20px;
+  width: min(1420px, calc(100% - 64px));
+  margin: 0 auto;
+  padding-bottom: 28px;
+}
+
+.explore-main,
+.explore-sidebar {
+  min-width: 0;
+}
+
+.scene-dissolve-enter-active,
+.scene-dissolve-leave-active {
+  transition: opacity .58s ease, filter .58s ease, transform .58s ease;
+}
+
+.scene-dissolve-enter-from {
+  opacity: 0;
+  filter: blur(16px) saturate(.75);
+  transform: scale(1.025);
+}
+
+.scene-dissolve-leave-to {
+  opacity: 0;
+  filter: blur(10px) saturate(.8);
+  transform: scale(.985);
+}
+
+@keyframes hero-arrive {
+  from { opacity: .5; transform: scale(1.045); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes guide-pulse {
+  0%, 100% { opacity: .35; transform: scaleY(.72); transform-origin: top; }
+  50% { opacity: 1; transform: scaleY(1); transform-origin: top; }
+}
+
+@media (max-width: 900px) {
+  .home-stage { height: calc(100vh - 72px); min-height: 680px; }
+  .hero-overlay { padding: 34px 24px 24px; }
+  .scene-switch { right: 20px; bottom: 116px; }
+  .inspiration-bg { top: 72px; height: calc(100vh - 72px); }
+  .inspiration-wash { inset: 72px 0 0; }
+  .inspiration-heading { grid-template-columns: 1fr auto; width: calc(100% - 32px); }
+  .inspiration-heading > div { grid-column: 1 / -1; grid-row: 1; }
+  .return-button { grid-column: 1; grid-row: 2; }
+  .planner-link { grid-column: 2; grid-row: 2; }
+  .explore-body { grid-template-columns: 1fr; width: calc(100% - 32px); }
+}
+
+@media (max-width: 640px) {
+  .home-stage { min-height: 720px; }
+  .hero-wash { background: rgba(239, 233, 218, .57); }
+  .scene-switch { bottom: 102px; }
+  .scene-switch span { display: none; }
+  .inspiration-heading { padding-top: 22px; }
+  .inspiration-heading h2 { font-size: 24px; letter-spacing: 1px; }
+  .inspiration-heading p { display: none; }
+}
+</style>

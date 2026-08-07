@@ -7,6 +7,7 @@ public record UserAuthResponse(
         Long userId,
         String username,
         String displayName,
+        String role,
         LocalDateTime expiresAt
 ) {
 }

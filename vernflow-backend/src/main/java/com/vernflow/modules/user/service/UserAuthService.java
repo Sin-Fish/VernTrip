@@ -3,6 +3,7 @@ package com.vernflow.modules.user.service;
 import com.vernflow.common.config.UserAuthProperties;
 import com.vernflow.common.exception.BusinessException;
 import com.vernflow.modules.user.domain.AppUser;
+import com.vernflow.modules.user.domain.AppUser.Role;
 import com.vernflow.modules.user.dto.UserAuthResponse;
 import com.vernflow.modules.user.dto.UserLoginRequest;
 import com.vernflow.modules.user.dto.UserProfileResponse;
@@ -30,11 +31,13 @@ public class UserAuthService {
     public static final String REQUEST_ATTR_USER_ID = "vernflow.user.id";
     public static final String REQUEST_ATTR_USERNAME = "vernflow.user.username";
     public static final String REQUEST_ATTR_DISPLAY_NAME = "vernflow.user.displayName";
+    public static final String REQUEST_ATTR_ROLE = "vernflow.user.role";
     public static final String REQUEST_ATTR_EXPIRES_AT = "vernflow.user.expiresAt";
 
     private static final List<SeedUser> DEFAULT_USERS = List.of(
-            new SeedUser("demo", "demo123", "Demo User"),
-            new SeedUser("reviewer", "reviewer123", "Reviewer")
+            new SeedUser("demo", "demo123", "游客演示账号", Role.TOURIST),
+            new SeedUser("merchant", "merchant123", "商家演示账号", Role.MERCHANT),
+            new SeedUser("reviewer", "reviewer123", "Reviewer", Role.INTERNAL)
     );
 
     private final UserAuthProperties userAuthProperties;
@@ -53,12 +56,15 @@ public class UserAuthService {
     @Transactional
     public void ensureDefaultUsers() {
         for (SeedUser seedUser : DEFAULT_USERS) {
-            appUserRepository.findByUsernameIgnoreCase(seedUser.username())
-                    .orElseGet(() -> appUserRepository.save(AppUser.create(
+            AppUser user = appUserRepository.findByUsernameIgnoreCase(seedUser.username())
+                    .orElseGet(() -> AppUser.create(
                             seedUser.username(),
                             hashPassword(seedUser.password()),
-                            seedUser.displayName()
-                    )));
+                            seedUser.displayName(),
+                            seedUser.role()
+                    ));
+            user.updateIdentity(seedUser.displayName(), seedUser.role());
+            appUserRepository.save(user);
         }
     }
 
@@ -73,8 +79,12 @@ public class UserAuthService {
 
         String token = UUID.randomUUID().toString();
         LocalDateTime expiresAt = LocalDateTime.now().plus(userAuthProperties.sessionTtl());
-        sessions.put(token, new UserSession(user.getId(), user.getUsername(), user.getDisplayName(), expiresAt));
-        return new UserAuthResponse(token, user.getId(), user.getUsername(), user.getDisplayName(), expiresAt);
+        sessions.put(token, new UserSession(
+                user.getId(), user.getUsername(), user.getDisplayName(), user.getRole().name(), expiresAt
+        ));
+        return new UserAuthResponse(
+                token, user.getId(), user.getUsername(), user.getDisplayName(), user.getRole().name(), expiresAt
+        );
     }
 
     public void logout(String token) {
@@ -102,6 +112,7 @@ public class UserAuthService {
                 session.userId(),
                 session.username(),
                 session.displayName(),
+                session.role(),
                 LocalDateTime.now().plus(userAuthProperties.sessionTtl())
         );
         sessions.put(token, refreshed);
@@ -141,11 +152,13 @@ public class UserAuthService {
         Object userId = request.getAttribute(REQUEST_ATTR_USER_ID);
         Object username = request.getAttribute(REQUEST_ATTR_USERNAME);
         Object displayName = request.getAttribute(REQUEST_ATTR_DISPLAY_NAME);
+        Object role = request.getAttribute(REQUEST_ATTR_ROLE);
         Object expiresAt = request.getAttribute(REQUEST_ATTR_EXPIRES_AT);
         return new UserProfileResponse(
                 userId instanceof Long id ? id : fallback.getId(),
                 username instanceof String text ? text : fallback.getUsername(),
                 displayName instanceof String text ? text : fallback.getDisplayName(),
+                role instanceof String text ? text : fallback.getRole().name(),
                 expiresAt instanceof LocalDateTime time ? time : null
         );
     }
@@ -177,10 +190,10 @@ public class UserAuthService {
         }
     }
 
-    private record SeedUser(String username, String password, String displayName) {
+    private record SeedUser(String username, String password, String displayName, Role role) {
     }
 
-    public record UserSession(Long userId, String username, String displayName, LocalDateTime expiresAt) {
+    public record UserSession(Long userId, String username, String displayName, String role, LocalDateTime expiresAt) {
     }
 
     public record UserSummary(Long id, String username, String displayName) {
