@@ -4,9 +4,12 @@ import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
+import jakarta.persistence.FetchType;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
 
 import java.math.BigDecimal;
@@ -41,12 +44,13 @@ public class TourismResource {
     @Column(nullable = false, length = 160)
     private String name;
 
+    @ManyToOne(fetch = FetchType.EAGER, optional = false)
+    @JoinColumn(name = "place_id", nullable = false)
+    private TourismPlace place;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 32)
     private Category category;
-
-    @Column(length = 80)
-    private String district;
 
     @Column(nullable = false, columnDefinition = "TEXT")
     private String summary;
@@ -56,15 +60,6 @@ public class TourismResource {
 
     @Column(name = "suitable_people_json", nullable = false, columnDefinition = "TEXT")
     private String suitablePeopleJson;
-
-    @Column(length = 255)
-    private String address;
-
-    @Column(precision = 10, scale = 6)
-    private BigDecimal longitude;
-
-    @Column(precision = 10, scale = 6)
-    private BigDecimal latitude;
 
     @Column(name = "source_name", nullable = false, length = 160)
     private String sourceName;
@@ -81,6 +76,15 @@ public class TourismResource {
     @Column(name = "price_max", nullable = false, precision = 12, scale = 2)
     private BigDecimal priceMax;
 
+    @Column(name = "reservation_required", nullable = false)
+    private boolean reservationRequired;
+
+    @Column(name = "daily_capacity")
+    private Integer dailyCapacity;
+
+    @Column(name = "available_capacity")
+    private Integer availableCapacity;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 24)
     private PublicationStatus status;
@@ -95,14 +99,12 @@ public class TourismResource {
     }
 
     private TourismResource(
-            String city,
+            TourismPlace place,
             String name,
             Category category,
-            String district,
             String summary,
             String tagsJson,
             String suitablePeopleJson,
-            String address,
             String sourceName,
             String sourceUrl,
             String openHours,
@@ -110,33 +112,33 @@ public class TourismResource {
             BigDecimal priceMax,
             PublicationStatus status
     ) {
-        this.city = city;
+        this.city = place.getCity();
         this.name = name;
+        this.place = place;
         this.category = category;
-        this.district = district;
         this.summary = summary;
         this.tagsJson = tagsJson;
         this.suitablePeopleJson = suitablePeopleJson;
-        this.address = address;
         this.sourceName = sourceName;
         this.sourceUrl = sourceUrl;
         this.openHours = openHours;
         this.priceMin = priceMin;
         this.priceMax = priceMax;
+        this.reservationRequired = false;
+        this.dailyCapacity = null;
+        this.availableCapacity = null;
         this.status = status;
         this.createdAt = LocalDateTime.now();
         this.updatedAt = this.createdAt;
     }
 
     public static TourismResource published(
-            String city,
+            TourismPlace place,
             String name,
             Category category,
-            String district,
             String summary,
             String tagsJson,
             String suitablePeopleJson,
-            String address,
             String sourceName,
             String sourceUrl,
             String openHours,
@@ -144,14 +146,12 @@ public class TourismResource {
             BigDecimal priceMax
     ) {
         return new TourismResource(
-                city,
+                place,
                 name,
                 category,
-                district,
                 summary,
                 tagsJson,
                 suitablePeopleJson,
-                address,
                 sourceName,
                 sourceUrl,
                 openHours,
@@ -162,14 +162,12 @@ public class TourismResource {
     }
 
     public static TourismResource draft(
-            String city,
+            TourismPlace place,
             String name,
             Category category,
-            String district,
             String summary,
             String tagsJson,
             String suitablePeopleJson,
-            String address,
             String sourceName,
             String sourceUrl,
             String openHours,
@@ -177,14 +175,12 @@ public class TourismResource {
             BigDecimal priceMax
     ) {
         return new TourismResource(
-                city,
+                place,
                 name,
                 category,
-                district,
                 summary,
                 tagsJson,
                 suitablePeopleJson,
-                address,
                 sourceName,
                 sourceUrl,
                 openHours,
@@ -199,10 +195,34 @@ public class TourismResource {
         this.updatedAt = LocalDateTime.now();
     }
 
-    public void updateCoordinates(BigDecimal longitude, BigDecimal latitude) {
-        this.longitude = longitude;
-        this.latitude = latitude;
+    public void updateDetails(
+            String name,
+            Category category,
+            String summary,
+            String tagsJson,
+            String openHours,
+            BigDecimal priceMin,
+            BigDecimal priceMax,
+            boolean reservationRequired,
+            Integer dailyCapacity,
+            Integer availableCapacity
+    ) {
+        this.name = name;
+        this.category = category;
+        this.summary = summary;
+        this.tagsJson = tagsJson;
+        this.openHours = openHours;
+        this.priceMin = priceMin;
+        this.priceMax = priceMax;
+        this.reservationRequired = reservationRequired;
+        this.dailyCapacity = reservationRequired ? dailyCapacity : null;
+        this.availableCapacity = reservationRequired ? availableCapacity : null;
         this.updatedAt = LocalDateTime.now();
+    }
+
+    public boolean isAvailableForPlanning() {
+        return status == PublicationStatus.PUBLISHED
+                && (!reservationRequired || availableCapacity == null || availableCapacity > 0);
     }
 
     public Long getId() {
@@ -221,8 +241,12 @@ public class TourismResource {
         return category;
     }
 
+    public TourismPlace getPlace() {
+        return place;
+    }
+
     public String getDistrict() {
-        return district;
+        return place.getDistrict();
     }
 
     public String getSummary() {
@@ -238,15 +262,19 @@ public class TourismResource {
     }
 
     public String getAddress() {
-        return address;
+        return place.getAddress();
+    }
+
+    public String getAmapPoiId() {
+        return place.getAmapPoiId();
     }
 
     public BigDecimal getLongitude() {
-        return longitude;
+        return place.getLongitude();
     }
 
     public BigDecimal getLatitude() {
-        return latitude;
+        return place.getLatitude();
     }
 
     public String getSourceName() {
@@ -267,6 +295,18 @@ public class TourismResource {
 
     public BigDecimal getPriceMax() {
         return priceMax;
+    }
+
+    public boolean isReservationRequired() {
+        return reservationRequired;
+    }
+
+    public Integer getDailyCapacity() {
+        return dailyCapacity;
+    }
+
+    public Integer getAvailableCapacity() {
+        return availableCapacity;
     }
 
     public PublicationStatus getStatus() {

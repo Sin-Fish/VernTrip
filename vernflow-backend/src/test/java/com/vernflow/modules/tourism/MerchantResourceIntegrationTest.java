@@ -11,9 +11,11 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
 import static org.hamcrest.Matchers.hasItem;
+import static org.hamcrest.Matchers.not;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -61,14 +63,31 @@ class MerchantResourceIntegrationTest {
                                   "name":"杭州扇艺手作体验",
                                   "category":"EXPERIENCE",
                                   "district":"拱墅区",
+                                  "placeName":"杭州工艺美术博物馆",
+                                  "amapPoiId":"B0FFH8X1DE",
+                                  "address":"拱墅区小河路450号",
+                                  "longitude":120.150114,
+                                  "latitude":30.320335,
                                   "summary":"在老师指导下完成一件传统扇艺作品，适合亲子家庭。",
-                                  "tags":["非遗体验","亲子友好","需预约"]
+                                  "tags":["非遗体验","亲子友好","需预约"],
+                                  "openHours":"09:00-17:00",
+                                  "priceMin":128,
+                                  "priceMax":228,
+                                  "reservationRequired":true,
+                                  "dailyCapacity":24,
+                                  "availableCapacity":8
                                 }
                                 """))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.status").value("DRAFT"))
                 .andExpect(jsonPath("$.data.statusLabel").value("待完善"))
-                .andExpect(jsonPath("$.data.qualityScore").value(80))
+                .andExpect(jsonPath("$.data.placeName").value("杭州工艺美术博物馆"))
+                .andExpect(jsonPath("$.data.locationStatus").value("VERIFIED"))
+                .andExpect(jsonPath("$.data.amapPoiId").value("B0FFH8X1DE"))
+                .andExpect(jsonPath("$.data.longitude").value(120.150114))
+                .andExpect(jsonPath("$.data.qualityScore").value(100))
+                .andExpect(jsonPath("$.data.availabilityStatus").value("AVAILABLE"))
+                .andExpect(jsonPath("$.data.availableCapacity").value(8))
                 .andReturn()
                 .getResponse()
                 .getContentAsString();
@@ -87,6 +106,78 @@ class MerchantResourceIntegrationTest {
         mockMvc.perform(get("/api/tourism/resources").param("city", "杭州"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data[*].name", hasItem("杭州扇艺手作体验")));
+
+        mockMvc.perform(put("/api/merchant/resources/{resourceId}", resourceId)
+                        .header("Authorization", "Bearer " + merchantToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "name":"杭州扇艺手作体验",
+                                  "category":"EXPERIENCE",
+                                  "summary":"传统扇艺手作体验，当前场次已经约满。",
+                                  "tags":["非遗体验","亲子友好","已约满"],
+                                  "openHours":"09:30-17:30",
+                                  "priceMin":138,
+                                  "priceMax":238,
+                                  "reservationRequired":true,
+                                  "dailyCapacity":24,
+                                  "availableCapacity":0
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("PUBLISHED"))
+                .andExpect(jsonPath("$.data.availabilityStatus").value("SOLD_OUT"))
+                .andExpect(jsonPath("$.data.availabilityLabel").value("已约满"));
+
+        mockMvc.perform(get("/api/tourism/resources").param("city", "杭州"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data[*].name", not(hasItem("杭州扇艺手作体验"))));
+
+        mockMvc.perform(put("/api/merchant/resources/{resourceId}", resourceId)
+                        .header("Authorization", "Bearer " + merchantToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "name":"杭州扇艺手作体验",
+                                  "category":"EXPERIENCE",
+                                  "summary":"传统扇艺手作体验，新场次已经开放预约。",
+                                  "tags":["非遗体验","亲子友好","需预约"],
+                                  "openHours":"09:30-17:30",
+                                  "priceMin":138,
+                                  "priceMax":238,
+                                  "reservationRequired":true,
+                                  "dailyCapacity":24,
+                                  "availableCapacity":6
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.availabilityStatus").value("LIMITED"));
+
+        mockMvc.perform(get("/api/tourism/resources").param("city", "杭州"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data[*].name", hasItem("杭州扇艺手作体验")))
+                .andExpect(jsonPath("$.data[?(@.name == '杭州扇艺手作体验')].openHours")
+                        .value(hasItem("09:30-17:30")));
+    }
+
+    @Test
+    void shouldRequireAmapPoiWhenCreatingMerchantResource() throws Exception {
+        String merchantToken = login("merchant", "merchant123");
+
+        mockMvc.perform(post("/api/merchant/resources")
+                        .header("Authorization", "Bearer " + merchantToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "city":"杭州",
+                                  "name":"未定位的体验资源",
+                                  "category":"EXPERIENCE",
+                                  "district":"拱墅区",
+                                  "summary":"缺少真实地点绑定。",
+                                  "tags":["体验"]
+                                }
+                                """))
+                .andExpect(status().isBadRequest());
     }
 
     @Test

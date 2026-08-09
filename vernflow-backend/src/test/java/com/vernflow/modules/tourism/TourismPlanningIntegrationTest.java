@@ -84,8 +84,11 @@ class TourismPlanningIntegrationTest {
                 .andExpect(jsonPath("$.success").value(true))
                 .andExpect(jsonPath("$.data.length()").value(12))
                 .andExpect(jsonPath("$.data[0].name").value("中国杭州工艺美术博物馆"))
-                .andExpect(jsonPath("$.data[0].longitude").value(120.150114))
-                .andExpect(jsonPath("$.data[0].latitude").value(30.320335));
+                .andExpect(jsonPath("$.data[0].placeName").value("杭州工艺美术博物馆"))
+                .andExpect(jsonPath("$.data[0].locationStatus").value("VERIFIED"))
+                .andExpect(jsonPath("$.data[0].amapPoiId").value("B023B0I02U"))
+                .andExpect(jsonPath("$.data[0].longitude").value(120.136930))
+                .andExpect(jsonPath("$.data[0].latitude").value(30.315645));
 
         String createdBody = mockMvc.perform(post("/api/tourism/trips/plan")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -108,8 +111,10 @@ class TourismPlanningIntegrationTest {
                 .andExpect(jsonPath("$.data.status").value("待决定"))
                 .andExpect(jsonPath("$.data.days.length()").value(2))
                 .andExpect(jsonPath("$.data.days[0].items.length()").value(4))
-                .andExpect(jsonPath("$.data.days[0].items[0].longitude").value(120.150114))
-                .andExpect(jsonPath("$.data.days[0].items[0].latitude").value(30.320335))
+                .andExpect(jsonPath("$.data.days[0].items[0].placeName").value("杭州工艺美术博物馆"))
+                .andExpect(jsonPath("$.data.days[0].items[0].locationStatus").value("VERIFIED"))
+                .andExpect(jsonPath("$.data.days[0].items[0].longitude").value(120.136930))
+                .andExpect(jsonPath("$.data.days[0].items[0].latitude").value(30.315645))
                 .andExpect(jsonPath("$.data.sources.length()").value(7))
                 .andReturn()
                 .getResponse()
@@ -119,6 +124,68 @@ class TourismPlanningIntegrationTest {
         long firstPlanId = created.path("id").asLong();
         assertThat(firstPlanId).isPositive();
         assertThat(created.path("budget").path("reserve").decimalValue()).isPositive();
+        long firstItemId = created.path("days").get(0).path("items").get(0).path("itemId").asLong();
+        assertThat(firstItemId).isPositive();
+
+        String replacedBody = mockMvc.perform(post("/api/tourism/plans/{planId}/adjust", firstPlanId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "type":"node",
+                                  "action":"replace",
+                                  "itemId":%d,
+                                  "note":"换成适合雨天的室内场馆。"
+                                }
+                                """.formatted(firstItemId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.parentPlanId").value(firstPlanId))
+                .andExpect(jsonPath("$.data.version").value(2))
+                .andExpect(jsonPath("$.data.days[0].items.length()").value(4))
+                .andExpect(jsonPath("$.data.days[0].items[0].title").value("中国丝绸博物馆"))
+                .andExpect(jsonPath("$.data.days[0].items[1].title").value("运河家常杭帮菜"))
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+
+        JsonNode replaced = objectMapper.readTree(replacedBody).path("data");
+        long replacedPlanId = replaced.path("id").asLong();
+        long replacedItemId = replaced.path("days").get(0).path("items").get(0).path("itemId").asLong();
+
+        String retimedBody = mockMvc.perform(post("/api/tourism/plans/{planId}/adjust", replacedPlanId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "type":"node",
+                                  "action":"time",
+                                  "itemId":%d,
+                                  "time":"10:15"
+                                }
+                                """.formatted(replacedItemId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.parentPlanId").value(replacedPlanId))
+                .andExpect(jsonPath("$.data.version").value(3))
+                .andExpect(jsonPath("$.data.days[0].items[0].time").value("10:15"))
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+
+        JsonNode retimed = objectMapper.readTree(retimedBody).path("data");
+        long retimedPlanId = retimed.path("id").asLong();
+        long retimedItemId = retimed.path("days").get(0).path("items").get(0).path("itemId").asLong();
+        mockMvc.perform(post("/api/tourism/plans/{planId}/adjust", retimedPlanId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "type":"node",
+                                  "action":"delete",
+                                  "itemId":%d
+                                }
+                                """.formatted(retimedItemId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.parentPlanId").value(retimedPlanId))
+                .andExpect(jsonPath("$.data.version").value(4))
+                .andExpect(jsonPath("$.data.days[0].items.length()").value(3))
+                .andExpect(jsonPath("$.data.days[0].items[0].title").value("运河家常杭帮菜"));
 
         String adjustedBody = mockMvc.perform(post("/api/tourism/plans/{planId}/adjust", firstPlanId)
                         .contentType(MediaType.APPLICATION_JSON)

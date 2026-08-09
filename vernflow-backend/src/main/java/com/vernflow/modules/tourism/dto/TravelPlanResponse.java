@@ -43,6 +43,7 @@ public record TravelPlanResponse(
     }
 
     public record PlanItem(
+            Long itemId,
             Long resourceId,
             String time,
             String label,
@@ -52,7 +53,10 @@ public record TravelPlanResponse(
             String tone,
             BigDecimal cost,
             String sourceName,
+            String placeName,
+            String locationStatus,
             String address,
+            String amapPoiId,
             BigDecimal longitude,
             BigDecimal latitude
     ) {

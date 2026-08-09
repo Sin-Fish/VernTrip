@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.vernflow.common.config.OpenClawProperties;
 import com.vernflow.modules.openclaw.service.OpenClawGatewayClient;
 import com.vernflow.modules.openclaw.service.OpenClawSessionContextService;
+import com.vernflow.modules.tourism.domain.TourismPlace;
 import com.vernflow.modules.tourism.domain.TourismResource;
 import com.vernflow.modules.tourism.domain.TripRequest;
 
@@ -55,6 +56,7 @@ class OpenClawItineraryServiceTest {
                                       {"time":"09:30","label":"认识杭州手艺","resourceName":"工艺博物馆","description":"以室内文化体验开启行程。","cost":0},
                                       {"time":"12:00","label":"午餐","resourceName":"运河杭帮菜","description":"选择适合家庭分享的本地菜。","cost":240},
                                       {"time":"14:30","label":"亲手做一件作品","resourceName":"桥畔手作课堂","description":"预留九十分钟完成亲子手作。","cost":180},
+                                      {"time":"17:00","label":"运河边散步","resourceName":"小河直街散步","description":"手作结束后在运河街区自由停留。","cost":0},
                                       {"time":"18:30","label":"就近住下","resourceName":"湖滨亲子酒店","description":"减少第二天跨区移动。","cost":900}
                                     ]},
                                     {"day":2,"items":[
@@ -77,7 +79,7 @@ class OpenClawItineraryServiceTest {
 
         assertThat(itinerary.title()).isEqualTo("杭州亲子手作慢游");
         assertThat(itinerary.matchScore()).isEqualTo(91);
-        assertThat(itinerary.stops()).hasSize(7);
+        assertThat(itinerary.stops()).hasSize(8);
         assertThat(itinerary.stops().get(2).tag()).isEqualTo("非遗体验");
         assertThat(itinerary.stops()).extracting(OpenClawItineraryService.AgentStop::resourceName)
                 .doesNotHaveDuplicates();
@@ -121,6 +123,41 @@ class OpenClawItineraryServiceTest {
                 .createResponse(eq("verntrip:invalid-test"), anyString(), anyString());
     }
 
+    @Test
+    void shouldPreserveAnUnsatisfiedReplacementDecisionForBackendValidation() {
+        when(sessionContextService.bind(eq(7L), eq(null), eq(false), eq(List.of())))
+                .thenReturn(new OpenClawSessionContextService.BoundSession(
+                        "verntrip:replacement-test",
+                        LocalDateTime.now().plusMinutes(30)
+                ));
+        when(gatewayClient.createResponse(eq("verntrip:replacement-test"), anyString(), anyString()))
+                .thenReturn(new OpenClawGatewayClient.ShadowResponse(
+                        "resp_replacement_1",
+                        """
+                                {
+                                  "resourceName":"丝绸博物馆",
+                                  "satisfiesRequest":false,
+                                  "reason":"候选资源中没有体育公园或户外运动场地。"
+                                }
+                                """,
+                        180L,
+                        260L
+                ));
+
+        OpenClawItineraryService.AgentReplacement replacement = service.selectReplacement(
+                7L,
+                request(),
+                resource("工艺博物馆", TourismResource.Category.CULTURE),
+                List.of(resource("丝绸博物馆", TourismResource.Category.CULTURE)),
+                List.of("桥畔手作课堂", "运河杭帮菜"),
+                "想换成体育公园"
+        ).orElseThrow();
+
+        assertThat(replacement.resourceName()).isEqualTo("丝绸博物馆");
+        assertThat(replacement.satisfiesRequest()).isFalse();
+        assertThat(replacement.reason()).contains("没有体育公园");
+    }
+
     private OpenClawProperties properties() {
         return new OpenClawProperties(
                 "openclaw",
@@ -157,6 +194,7 @@ class OpenClawItineraryServiceTest {
                 resource("工艺博物馆", TourismResource.Category.CULTURE),
                 resource("运河杭帮菜", TourismResource.Category.FOOD),
                 resource("桥畔手作课堂", TourismResource.Category.EXPERIENCE),
+                resource("小河直街散步", TourismResource.Category.LEISURE),
                 resource("湖滨亲子酒店", TourismResource.Category.LODGING),
                 resource("西湖慢行段", TourismResource.Category.SCENIC),
                 resource("湖滨时令小馆", TourismResource.Category.FOOD),
@@ -165,15 +203,22 @@ class OpenClawItineraryServiceTest {
     }
 
     private TourismResource resource(String name, TourismResource.Category category) {
-        return TourismResource.published(
+        TourismPlace place = TourismPlace.approximate(
                 "杭州",
                 name,
-                category,
                 "演示区域",
+                "测试地址",
+                BigDecimal.valueOf(120.1),
+                BigDecimal.valueOf(30.2),
+                "测试地点"
+        );
+        return TourismResource.published(
+                place,
+                name,
+                category,
                 "用于结构化行程测试的可信资源。",
                 "[]",
                 "[]",
-                null,
                 "测试资源库",
                 null,
                 null,

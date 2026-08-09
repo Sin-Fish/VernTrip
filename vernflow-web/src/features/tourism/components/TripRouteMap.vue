@@ -1,5 +1,12 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import {
+  amapConfigured,
+  getAmapPoi,
+  loadAmap,
+  searchAmapPois,
+  selectReliablePoi,
+} from '@/lib/amapPoi'
 
 const props = defineProps({
   day: { type: Object, required: true },
@@ -11,14 +18,41 @@ const status = ref('idle')
 const errorMessage = ref('')
 const routeDistance = ref('')
 const routeDuration = ref('')
+const resolvedItems = ref([])
 
-const apiKey = (import.meta.env.VITE_AMAP_JS_KEY ?? '').trim()
-const securityCode = (import.meta.env.VITE_AMAP_SECURITY_CODE ?? '').trim()
-const configured = Boolean(apiKey && securityCode)
-const locatedItems = computed(() => (props.day?.items ?? []).filter((item) => (
+const configured = amapConfigured
+const displayItems = computed(() => resolvedItems.value.length
+  ? resolvedItems.value
+  : (props.day?.items ?? []).map((item) => ({
+      ...item,
+      locationSource: hasCoordinates(item)
+        ? item.locationStatus === 'VERIFIED' ? 'verified-place' : 'resource'
+        : 'missing',
+    })))
+const locatedItems = computed(() => displayItems.value.filter((item) => (
   Number.isFinite(Number(item.longitude)) && Number.isFinite(Number(item.latitude))
 )))
-const missingLocationCount = computed(() => (props.day?.items?.length ?? 0) - locatedItems.value.length)
+const poiMatchedCount = computed(() => displayItems.value.filter((item) => (
+  item.locationSource === 'amap-poi' || item.locationSource === 'verified-place'
+)).length)
+const fallbackLocationCount = computed(() => displayItems.value.filter((item) => item.locationSource === 'resource').length)
+const missingLocationCount = computed(() => displayItems.value.filter((item) => item.locationSource === 'missing').length)
+const routeSignature = computed(() => JSON.stringify({
+  day: props.day?.day,
+  city: props.city,
+  items: (props.day?.items ?? []).map((item) => [
+    item.itemId,
+    item.resourceId,
+    item.time,
+    item.title,
+    item.placeName,
+    item.locationStatus,
+    item.address,
+    item.amapPoiId,
+    item.longitude,
+    item.latitude,
+  ]),
+}))
 
 let map = null
 let driving = null
@@ -29,6 +63,43 @@ function destroyMap() {
   driving = null
   map?.destroy?.()
   map = null
+}
+
+function hasCoordinates(item) {
+  return Number.isFinite(Number(item?.longitude)) && Number.isFinite(Number(item?.latitude))
+}
+
+function fallbackItem(item) {
+  return {
+    ...item,
+    locationSource: hasCoordinates(item)
+      ? item.locationStatus === 'VERIFIED' ? 'verified-place' : 'resource'
+      : 'missing',
+  }
+}
+
+async function resolveMapItem(AMap, item) {
+  try {
+    const poi = item.amapPoiId
+      ? await getAmapPoi(AMap, item.amapPoiId, props.city)
+      : selectReliablePoi(
+          item.placeName || item.title,
+          await searchAmapPois(AMap, { keyword: item.placeName || item.title, city: props.city }),
+        )
+    if (!poi) return fallbackItem(item)
+    return {
+      ...item,
+      amapPoiId: poi.id,
+      poiName: poi.name,
+      placeName: poi.name,
+      address: poi.address || item.address,
+      longitude: poi.longitude,
+      latitude: poi.latitude,
+      locationSource: 'amap-poi',
+    }
+  } catch {
+    return fallbackItem(item)
+  }
 }
 
 function markerContent(index) {
@@ -53,28 +124,34 @@ async function renderRoute() {
   routeDistance.value = ''
   routeDuration.value = ''
   errorMessage.value = ''
+  resolvedItems.value = []
 
   if (!configured) {
     status.value = 'configuration-required'
     return
   }
-  if (locatedItems.value.length < 2) {
+  if ((props.day?.items?.length ?? 0) < 2) {
     status.value = 'insufficient-points'
     return
   }
 
-  status.value = 'loading'
+  status.value = 'locating'
   await nextTick()
 
   try {
-    window._AMapSecurityConfig = { securityJsCode: securityCode }
-    const { default: AMapLoader } = await import('@amap/amap-jsapi-loader')
-    const AMap = await AMapLoader.load({
-      key: apiKey,
-      version: '2.0',
-      plugins: ['AMap.Driving', 'AMap.Scale'],
-    })
+    const AMap = await loadAmap()
     if (sequence !== renderSequence) return
+    resolvedItems.value = await Promise.all(
+      (props.day?.items ?? []).map((item) => resolveMapItem(AMap, item)),
+    )
+    if (sequence !== renderSequence) return
+    if (locatedItems.value.length < 2) {
+      status.value = 'insufficient-points'
+      return
+    }
+
+    status.value = 'routing'
+    await nextTick()
     const points = locatedItems.value.map((item) => new AMap.LngLat(
       Number(item.longitude),
       Number(item.latitude),
@@ -91,7 +168,7 @@ async function renderRoute() {
       position,
       anchor: 'center',
       content: markerContent(index),
-      title: locatedItems.value[index].title,
+      title: locatedItems.value[index].poiName || locatedItems.value[index].title,
       zIndex: 120 + index,
     })))
 
@@ -130,7 +207,7 @@ async function renderRoute() {
 }
 
 onMounted(renderRoute)
-watch(() => props.day?.day, renderRoute)
+watch(routeSignature, renderRoute)
 onBeforeUnmount(() => {
   renderSequence += 1
   destroyMap()
@@ -145,16 +222,16 @@ onBeforeUnmount(() => {
         <h3>把一天的路，放到地图上</h3>
       </div>
       <span v-if="status === 'ready'">
-        约 {{ routeDistance }}<i></i>驾车 {{ routeDuration }}
+        高德 POI {{ poiMatchedCount }}/{{ day.items.length }}<i></i>约 {{ routeDistance }} · {{ routeDuration }}
       </span>
       <span v-else>{{ locatedItems.length }} 个已定位节点</span>
     </header>
 
-    <div v-if="configured && locatedItems.length >= 2" class="trip-map-shell">
+    <div v-if="configured && status !== 'insufficient-points'" class="trip-map-shell">
       <div ref="mapContainer" class="trip-map-canvas"></div>
-      <div v-if="status === 'loading'" class="trip-map-state">
-        <b>正在计算真实道路路线</b>
-        <small>高德地图正在连接当天的行程节点</small>
+      <div v-if="status === 'locating' || status === 'routing'" class="trip-map-state">
+        <b>{{ status === 'locating' ? '正在校准真实地点' : '正在计算真实道路路线' }}</b>
+        <small>{{ status === 'locating' ? `高德 POI 正在核对${city}的行程节点` : '高德地图正在连接当天的行程节点' }}</small>
       </div>
       <div v-else-if="status === 'error'" class="trip-map-state error">
         <b>路线暂时没有加载出来</b>
@@ -175,14 +252,22 @@ onBeforeUnmount(() => {
     </div>
 
     <ol class="trip-route-stops">
-      <li v-for="(item, index) in day.items" :key="`${day.day}-${item.resourceId}-${item.time}`" :class="{ missing: item.longitude == null || item.latitude == null }">
+      <li
+        v-for="(item, index) in displayItems"
+        :key="`${day.day}-${item.resourceId}-${item.time}`"
+        :class="{ verified: item.locationSource === 'amap-poi' || item.locationSource === 'verified-place', fallback: item.locationSource === 'resource', missing: item.locationSource === 'missing' }"
+      >
         <span>{{ index + 1 }}</span>
-        <div><small>{{ item.time }}</small><b>{{ item.title }}</b></div>
-        <em>{{ item.longitude == null || item.latitude == null ? '待定位' : item.address || city }}</em>
+        <div><small>{{ item.time }}</small><b>{{ item.title }}</b><span v-if="item.placeName">到访 · {{ item.placeName }}</span></div>
+        <em>{{ item.locationSource === 'missing' ? '待定位' : item.address || city }}</em>
+        <mark>{{ item.locationSource === 'amap-poi' ? '高德实时校准' : item.locationSource === 'verified-place' ? '高德已核验' : item.locationSource === 'resource' ? '近似地点' : '未定位' }}</mark>
       </li>
     </ol>
     <p v-if="missingLocationCount" class="trip-route-warning">
       {{ missingLocationCount }} 个节点尚未维护坐标，本次路线未包含这些节点。
+    </p>
+    <p v-else-if="fallbackLocationCount" class="trip-route-warning">
+      {{ fallbackLocationCount }} 个节点未找到可信的同名 POI，已保留资源库坐标，避免错误匹配。
     </p>
   </section>
 </template>
@@ -212,7 +297,11 @@ onBeforeUnmount(() => {
 .trip-route-stops li > div { display: grid; min-width: 0; gap: 2px; }
 .trip-route-stops small { color: #b65c49; font-size: 9px; }
 .trip-route-stops b { overflow: hidden; color: #2d4039; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.trip-route-stops li > div > span { overflow: hidden; color: #68766f; font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
 .trip-route-stops em { grid-column: 2; overflow: hidden; color: #8a908a; font-size: 8px; font-style: normal; text-overflow: ellipsis; white-space: nowrap; }
+.trip-route-stops mark { grid-column: 2; justify-self: start; padding: 2px 5px; border-radius: 999px; background: #e4eee9; color: #397064; font-size: 7px; }
+.trip-route-stops li.fallback mark { background: #efe5d7; color: #9c644f; }
+.trip-route-stops li.missing mark { background: #ece8e0; color: #827d74; }
 .trip-route-stops li.missing { opacity: .55; }
 .trip-route-stops li.missing > span { background: #938c82; }
 .trip-route-warning { margin: 0; padding: 10px 17px; border-top: 1px solid rgba(182, 92, 73, .12); background: rgba(182, 92, 73, .05); color: #9c5547; font-size: 9px; }

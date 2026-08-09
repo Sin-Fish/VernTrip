@@ -4,9 +4,12 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.vernflow.common.exception.BusinessException;
+import com.vernflow.modules.tourism.domain.TourismPlace;
 import com.vernflow.modules.tourism.domain.TourismResource;
 import com.vernflow.modules.tourism.dto.MerchantResourceCreateRequest;
 import com.vernflow.modules.tourism.dto.MerchantResourceResponse;
+import com.vernflow.modules.tourism.dto.MerchantResourceUpdateRequest;
+import com.vernflow.modules.tourism.repository.TourismPlaceRepository;
 import com.vernflow.modules.tourism.repository.TourismResourceRepository;
 
 import org.springframework.stereotype.Service;
@@ -20,15 +23,19 @@ import java.util.List;
 public class MerchantResourceService {
 
     private static final String MERCHANT_SOURCE = "商家自主维护";
+    private static final String AMAP_SOURCE = "高德 POI（商家选择）";
 
     private final TourismResourceRepository tourismResourceRepository;
+    private final TourismPlaceRepository tourismPlaceRepository;
     private final ObjectMapper objectMapper;
 
     public MerchantResourceService(
             TourismResourceRepository tourismResourceRepository,
+            TourismPlaceRepository tourismPlaceRepository,
             ObjectMapper objectMapper
     ) {
         this.tourismResourceRepository = tourismResourceRepository;
+        this.tourismPlaceRepository = tourismPlaceRepository;
         this.objectMapper = objectMapper;
     }
 
@@ -48,22 +55,86 @@ public class MerchantResourceService {
         }
 
         List<String> tags = sanitizeTags(request.tags());
+        OperatingDetails operating = operatingDetails(
+                request.openHours(),
+                request.priceMin(),
+                request.priceMax(),
+                request.reservationRequired(),
+                request.dailyCapacity(),
+                request.availableCapacity()
+        );
+        TourismPlace place = tourismPlaceRepository.findByAmapPoiId(request.amapPoiId().trim())
+                .orElseGet(() -> tourismPlaceRepository.save(TourismPlace.verified(
+                        city,
+                        request.placeName().trim(),
+                        request.district().trim(),
+                        StringUtils.hasText(request.address()) ? request.address().trim() : request.district().trim(),
+                        request.amapPoiId().trim(),
+                        request.longitude(),
+                        request.latitude(),
+                        AMAP_SOURCE
+                )));
         TourismResource resource = TourismResource.draft(
-                city,
+                place,
                 name,
                 request.category(),
-                request.district().trim(),
                 StringUtils.hasText(request.summary())
                         ? request.summary().trim()
                         : "商家已创建基础资源，详细体验说明等待补充。",
                 writeList(tags),
                 writeList(List.of()),
-                null,
                 MERCHANT_SOURCE,
                 null,
-                null,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO
+                operating.openHours(),
+                operating.priceMin(),
+                operating.priceMax()
+        );
+        resource.updateDetails(
+                name,
+                request.category(),
+                resource.getSummary(),
+                writeList(tags),
+                operating.openHours(),
+                operating.priceMin(),
+                operating.priceMax(),
+                operating.reservationRequired(),
+                operating.dailyCapacity(),
+                operating.availableCapacity()
+        );
+        return toResponse(tourismResourceRepository.save(resource));
+    }
+
+    @Transactional
+    public MerchantResourceResponse updateResource(Long resourceId, MerchantResourceUpdateRequest request) {
+        TourismResource resource = tourismResourceRepository.findById(resourceId)
+                .orElseThrow(() -> new BusinessException("文旅资源不存在。"));
+        String name = request.name().trim();
+        if (tourismResourceRepository.existsByCityIgnoreCaseAndNameIgnoreCaseAndIdNot(
+                resource.getCity(),
+                name,
+                resourceId
+        )) {
+            throw new BusinessException("同一城市下已存在同名文旅资源。");
+        }
+        OperatingDetails operating = operatingDetails(
+                request.openHours(),
+                request.priceMin(),
+                request.priceMax(),
+                request.reservationRequired(),
+                request.dailyCapacity(),
+                request.availableCapacity()
+        );
+        resource.updateDetails(
+                name,
+                request.category(),
+                request.summary().trim(),
+                writeList(sanitizeTags(request.tags())),
+                operating.openHours(),
+                operating.priceMin(),
+                operating.priceMax(),
+                operating.reservationRequired(),
+                operating.dailyCapacity(),
+                operating.availableCapacity()
         );
         return toResponse(tourismResourceRepository.save(resource));
     }
@@ -90,6 +161,13 @@ public class MerchantResourceService {
                 resource.getCategory().name(),
                 categoryLabel(resource.getCategory()),
                 resource.getDistrict(),
+                resource.getPlace().getId(),
+                resource.getPlace().getName(),
+                resource.getPlace().getVerificationStatus().name(),
+                resource.getAmapPoiId(),
+                resource.getAddress(),
+                resource.getLongitude(),
+                resource.getLatitude(),
                 resource.getSummary(),
                 readList(resource.getTagsJson()),
                 resource.getSourceName(),
@@ -97,6 +175,11 @@ public class MerchantResourceService {
                 resource.getOpenHours(),
                 resource.getPriceMin(),
                 resource.getPriceMax(),
+                resource.isReservationRequired(),
+                resource.getDailyCapacity(),
+                resource.getAvailableCapacity(),
+                availabilityStatus(resource),
+                availabilityLabel(resource),
                 resource.getStatus().name(),
                 statusLabel(resource.getStatus()),
                 qualityScore(resource),
@@ -118,6 +201,11 @@ public class MerchantResourceService {
         if (StringUtils.hasText(resource.getSourceName())) {
             score += 5;
         }
+        if (resource.getPlace().getVerificationStatus() == TourismPlace.VerificationStatus.VERIFIED
+                && resource.getLongitude() != null
+                && resource.getLatitude() != null) {
+            score += 10;
+        }
         if (StringUtils.hasText(resource.getOpenHours())) {
             score += 8;
         }
@@ -128,6 +216,60 @@ public class MerchantResourceService {
             score += 7;
         }
         return Math.min(score, 100);
+    }
+
+    private OperatingDetails operatingDetails(
+            String openHours,
+            BigDecimal priceMin,
+            BigDecimal priceMax,
+            Boolean reservationRequired,
+            Integer dailyCapacity,
+            Integer availableCapacity
+    ) {
+        BigDecimal normalizedMin = priceMin == null ? BigDecimal.ZERO : priceMin;
+        BigDecimal normalizedMax = priceMax == null ? normalizedMin : priceMax;
+        if (normalizedMax.compareTo(normalizedMin) < 0) {
+            throw new BusinessException("最高价格不能低于最低价格。");
+        }
+        boolean requiresReservation = Boolean.TRUE.equals(reservationRequired);
+        if (requiresReservation && (dailyCapacity == null || dailyCapacity <= 0 || availableCapacity == null)) {
+            throw new BusinessException("需要预约的资源必须填写每日容量和当前余量。");
+        }
+        if (requiresReservation && availableCapacity > dailyCapacity) {
+            throw new BusinessException("当前余量不能超过每日容量。");
+        }
+        return new OperatingDetails(
+                StringUtils.hasText(openHours) ? openHours.trim() : null,
+                normalizedMin,
+                normalizedMax,
+                requiresReservation,
+                requiresReservation ? dailyCapacity : null,
+                requiresReservation ? availableCapacity : null
+        );
+    }
+
+    private String availabilityStatus(TourismResource resource) {
+        if (!resource.isReservationRequired()) {
+            return "DIRECT";
+        }
+        if (resource.getAvailableCapacity() != null && resource.getAvailableCapacity() == 0) {
+            return "SOLD_OUT";
+        }
+        if (resource.getDailyCapacity() != null
+                && resource.getAvailableCapacity() != null
+                && resource.getAvailableCapacity() * 4 <= resource.getDailyCapacity()) {
+            return "LIMITED";
+        }
+        return "AVAILABLE";
+    }
+
+    private String availabilityLabel(TourismResource resource) {
+        return switch (availabilityStatus(resource)) {
+            case "SOLD_OUT" -> "已约满";
+            case "LIMITED" -> "余量紧张";
+            case "AVAILABLE" -> "可预约";
+            default -> "无需预约";
+        };
     }
 
     private List<String> sanitizeTags(List<String> tags) {
@@ -180,5 +322,15 @@ public class MerchantResourceService {
         } catch (JsonProcessingException exception) {
             return List.of();
         }
+    }
+
+    private record OperatingDetails(
+            String openHours,
+            BigDecimal priceMin,
+            BigDecimal priceMax,
+            boolean reservationRequired,
+            Integer dailyCapacity,
+            Integer availableCapacity
+    ) {
     }
 }

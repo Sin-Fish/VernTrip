@@ -1181,6 +1181,12 @@
   font-size: 22px;
 }
 
+.day-plan-title p {
+  margin: 0 0 0 auto;
+  color: var(--travel-muted);
+  font-size: 10px;
+}
+
 .route-overview {
   display: flex;
   gap: 8px;
@@ -1280,6 +1286,35 @@
   margin-top: 6px;
   color: var(--travel-forest);
   font-size: 11px;
+}
+
+.node-adjust-button {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  padding: 4px 0;
+  margin-top: 8px;
+  color: var(--travel-forest);
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid rgba(31, 89, 82, 0.32);
+  font-size: 10px;
+  font-weight: 800;
+  transition: color 0.18s ease, border-color 0.18s ease;
+}
+
+.node-adjust-button span {
+  color: var(--travel-clay);
+  transition: transform 0.18s ease;
+}
+
+.node-adjust-button:hover {
+  color: var(--travel-clay);
+  border-color: var(--travel-clay);
+}
+
+.node-adjust-button:hover span {
+  transform: translate(2px, -2px);
 }
 
 .plan-risks {
@@ -1466,6 +1501,92 @@
   color: var(--travel-muted);
   font-size: 13px;
   line-height: 1.7;
+}
+
+.node-adjustment-sheet {
+  width: min(690px, 100%);
+}
+
+.selected-node-summary {
+  display: grid;
+  grid-template-columns: 58px minmax(0, 1fr) auto;
+  gap: 16px;
+  align-items: center;
+  padding: 18px 0 22px;
+  margin-bottom: 23px;
+  border-bottom: 1px solid var(--travel-line);
+}
+
+.selected-node-summary > span {
+  color: var(--travel-clay);
+  font-family: var(--travel-serif);
+  font-size: 18px;
+}
+
+.selected-node-summary small {
+  color: var(--travel-muted);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+
+.selected-node-summary h2 {
+  margin: 3px 0 0;
+  font-size: 25px;
+}
+
+.selected-node-summary em {
+  padding: 7px 9px;
+  color: var(--travel-forest);
+  background: #e3eee7;
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 800;
+}
+
+.node-action-options {
+  margin-bottom: 22px;
+}
+
+.node-action-options button:last-child.selected {
+  background: #9a4f3e;
+  border-color: #9a4f3e;
+}
+
+.node-adjustment-sheet .planner-field > span {
+  color: var(--travel-forest);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.node-adjustment-sheet .planner-field > small {
+  color: var(--travel-muted);
+  font-size: 10px;
+  line-height: 1.6;
+}
+
+.node-time-field input {
+  width: 180px;
+  font-family: var(--travel-serif);
+  font-size: 20px;
+}
+
+.node-delete-warning {
+  padding: 18px 20px;
+  color: #713f35;
+  background: #f3e5de;
+  border-left: 3px solid var(--travel-clay);
+}
+
+.node-delete-warning strong {
+  font-family: var(--travel-serif);
+  font-size: 17px;
+}
+
+.node-delete-warning p {
+  margin: 7px 0 0;
+  font-size: 11px;
+  line-height: 1.65;
 }
 
 .sheet-close {
@@ -1861,6 +1982,15 @@
     padding: 21px 16px;
   }
 
+  .day-plan-title {
+    flex-wrap: wrap;
+  }
+
+  .day-plan-title p {
+    flex-basis: 100%;
+    margin-left: 0;
+  }
+
   .timeline li {
     grid-template-columns: 42px 17px 1fr;
     gap: 8px;
@@ -1880,5 +2010,14 @@
 
   .adjustment-sheet {
     padding: 31px 22px 25px;
+  }
+
+  .selected-node-summary {
+    grid-template-columns: 48px minmax(0, 1fr);
+  }
+
+  .selected-node-summary em {
+    grid-column: 1 / -1;
+    justify-self: start;
   }
 }

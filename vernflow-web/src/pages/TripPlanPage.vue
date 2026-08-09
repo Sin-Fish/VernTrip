@@ -9,10 +9,19 @@ const { state, adjustCurrentPlan, saveCurrentPlan } = useTravelPlanning();
 const activeDay = ref(1);
 const adjustmentOpen = ref(false);
 const adjustment = ref({ type: "pace", note: "" });
+const nodeAdjustmentOpen = ref(false);
+const selectedNode = ref(null);
+const nodeAdjustment = ref({ action: "replace", note: "", time: "" });
 const savedNotice = ref("");
 
 const plan = computed(() => state.currentPlan);
 const selectedDay = computed(() => plan.value?.days.find((day) => day.day === activeDay.value) ?? plan.value?.days[0]);
+const nodeSubmitLabel = computed(() => {
+  if (state.isGenerating) return "正在调整此节点…";
+  if (nodeAdjustment.value.action === "delete") return "确认删除此节点";
+  if (nodeAdjustment.value.action === "time") return "保存新的到达时间";
+  return "让 OpenClaw 替换此节点";
+});
 const engineSteps = computed(() => {
   if (plan.value?.engine === "openclaw") {
     return ["OpenClaw 需求理解", "OpenClaw 结构化编排", "后端可信校验"];
@@ -46,6 +55,56 @@ async function applyAdjustment() {
   adjustmentOpen.value = false;
   adjustment.value.note = "";
   savedNotice.value = "已根据你的要求生成新版本";
+}
+
+function openNodeAdjustment(item) {
+  state.error = "";
+  selectedNode.value = {
+    ...item,
+    day: selectedDay.value.day,
+  };
+  nodeAdjustment.value = {
+    action: "replace",
+    note: "",
+    time: item.time,
+  };
+  nodeAdjustmentOpen.value = true;
+  savedNotice.value = "";
+}
+
+function closeNodeAdjustment() {
+  if (state.isGenerating) return;
+  nodeAdjustmentOpen.value = false;
+  selectedNode.value = null;
+}
+
+async function applyNodeAdjustment() {
+  if (!selectedNode.value) return;
+  const currentDay = selectedNode.value.day;
+  const payload = {
+    type: "node",
+    action: nodeAdjustment.value.action,
+    itemId: selectedNode.value.itemId,
+  };
+  if (nodeAdjustment.value.action === "replace") {
+    payload.note = nodeAdjustment.value.note.trim();
+  }
+  if (nodeAdjustment.value.action === "time") {
+    payload.time = nodeAdjustment.value.time;
+  }
+
+  const previousTitle = selectedNode.value.title;
+  const nextPlan = await adjustCurrentPlan(payload);
+  if (!nextPlan) return;
+
+  activeDay.value = currentDay;
+  nodeAdjustmentOpen.value = false;
+  selectedNode.value = null;
+  savedNotice.value = nodeAdjustment.value.action === "replace"
+    ? `已局部替换“${previousTitle}”，其他节点保持不变`
+    : nodeAdjustment.value.action === "delete"
+      ? `已删除“${previousTitle}”，路线与预算已更新`
+      : `已调整“${previousTitle}”的时间，地图路线已同步`;
 }
 
 async function savePlan() {
@@ -109,14 +168,18 @@ function startOver() {
             </div>
           </div>
           <article class="day-plan">
-            <div class="day-plan-title"><span>DAY {{ selectedDay.day }}</span><h3>{{ selectedDay.title }}</h3></div>
+            <div class="day-plan-title">
+              <span>DAY {{ selectedDay.day }}</span>
+              <h3>{{ selectedDay.title }}</h3>
+              <p>选择一个节点局部修改，其余安排会自动锁定</p>
+            </div>
             <div class="route-overview" aria-label="当日路线速览">
-              <span v-for="(item, index) in selectedDay.items" :key="`route-${item.time}`">
+              <span v-for="(item, index) in selectedDay.items" :key="`route-${item.itemId}`">
                 <small>{{ item.time }}</small><b>{{ item.title }}</b><i v-if="index < selectedDay.items.length - 1">→</i>
               </span>
             </div>
             <ol class="timeline">
-              <li v-for="item in selectedDay.items" :key="`${selectedDay.day}-${item.time}`">
+              <li v-for="item in selectedDay.items" :key="item.itemId">
                 <time>{{ item.time }}</time>
                 <span :class="['timeline-dot', item.tone]"></span>
                 <div class="timeline-copy">
@@ -124,6 +187,14 @@ function startOver() {
                   <h4>{{ item.title }}</h4>
                   <p>{{ item.description }}</p>
                   <b v-if="item.cost">预计 ¥ {{ item.cost.toLocaleString("zh-CN") }}</b>
+                  <button
+                    class="node-adjust-button"
+                    type="button"
+                    :aria-label="`调整节点 ${item.title}`"
+                    @click="openNodeAdjustment(item)"
+                  >
+                    调整此节点 <span>↗</span>
+                  </button>
                 </div>
               </li>
             </ol>
@@ -156,7 +227,7 @@ function startOver() {
 
         <section class="plan-actions-card">
           <p>计划总会随着心情改变。</p>
-          <button class="travel-button travel-button-primary" type="button" @click="adjustmentOpen = true">改一改这份计划 <span>→</span></button>
+          <button class="travel-button travel-button-primary" type="button" @click="adjustmentOpen = true">整体调整这份计划 <span>→</span></button>
           <span v-if="savedNotice" class="saved-notice">{{ savedNotice }}</span>
           <span v-if="state.error" class="field-error">{{ state.error }}</span>
         </section>
@@ -167,6 +238,49 @@ function startOver() {
         </section>
       </aside>
     </section>
+
+    <div v-if="nodeAdjustmentOpen && selectedNode" class="adjustment-backdrop" @click.self="closeNodeAdjustment">
+      <section class="adjustment-sheet node-adjustment-sheet" aria-label="调整单个行程节点">
+        <button class="sheet-close" type="button" aria-label="关闭节点调整" @click="closeNodeAdjustment">×</button>
+        <p class="travel-eyebrow">ADJUST ONE STOP / DAY {{ selectedNode.day }}</p>
+        <div class="selected-node-summary">
+          <span>{{ selectedNode.time }}</span>
+          <div><small>当前选择</small><h2>{{ selectedNode.title }}</h2></div>
+          <em>其余节点已锁定</em>
+        </div>
+
+        <div class="adjustment-options node-action-options" role="group" aria-label="节点调整方式">
+          <button :class="{ selected: nodeAdjustment.action === 'replace' }" type="button" @click="nodeAdjustment.action = 'replace'">AI 替换</button>
+          <button :class="{ selected: nodeAdjustment.action === 'time' }" type="button" @click="nodeAdjustment.action = 'time'">调整时间</button>
+          <button :class="{ selected: nodeAdjustment.action === 'delete' }" type="button" @click="nodeAdjustment.action = 'delete'">删除节点</button>
+        </div>
+
+        <label v-if="nodeAdjustment.action === 'replace'" class="planner-field notes-field">
+          <span>希望替换成什么样的安排</span>
+          <textarea v-model="nodeAdjustment.note" rows="3" placeholder="例如：换成适合雨天的室内场馆，距离下一站近一些"></textarea>
+          <small>OpenClaw 只会从同类型、已审核且当前行程未使用的资源中选择。</small>
+        </label>
+        <label v-else-if="nodeAdjustment.action === 'time'" class="planner-field node-time-field">
+          <span>新的到达时间</span>
+          <input v-model="nodeAdjustment.time" type="time" />
+          <small>仅修改该节点时间，节点内容和其他安排保持不变。</small>
+        </label>
+        <div v-else class="node-delete-warning">
+          <strong>删除后将重新连接前后路线</strong>
+          <p>系统会生成一个新版本，并重新计算当天路线与预算，不会覆盖当前版本。</p>
+        </div>
+
+        <p v-if="state.error" class="field-error">{{ state.error }}</p>
+        <button
+          class="travel-button travel-button-primary sheet-submit"
+          type="button"
+          :disabled="state.isGenerating || (nodeAdjustment.action === 'time' && !nodeAdjustment.time)"
+          @click="applyNodeAdjustment"
+        >
+          {{ nodeSubmitLabel }} <span>→</span>
+        </button>
+      </section>
+    </div>
 
     <div v-if="adjustmentOpen" class="adjustment-backdrop" @click.self="adjustmentOpen = false">
       <section class="adjustment-sheet" aria-label="调整旅行计划">

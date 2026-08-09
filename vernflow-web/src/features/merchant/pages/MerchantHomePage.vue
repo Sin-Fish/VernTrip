@@ -5,20 +5,27 @@ import { useUserAuth } from '@/composables/useUserAuth'
 import {
   createMerchantResource,
   listMerchantResources,
+  updateMerchantResource,
   updateMerchantResourceStatus,
 } from '@/lib/merchantApi'
+import { loadAmap, searchAmapPois } from '@/lib/amapPoi'
 
 const router = useRouter()
 const { currentUser, hydrateUserProfile, signOutUser } = useUserAuth()
 const activeSection = ref('overview')
 const resourceFilter = ref('全部')
 const resourceModalOpen = ref(false)
+const resourceEditorOpen = ref(false)
 const contentGenerating = ref(false)
 const toast = ref('')
 const resourceLoading = ref(true)
 const resourceSaving = ref(false)
+const resourceEditing = ref(false)
 const resourceError = ref('')
 const updatingResourceId = ref(null)
+const poiSearching = ref(false)
+const poiResults = ref([])
+const poiSearchError = ref('')
 
 const sectionTitles = {
   overview: '经营总览',
@@ -36,6 +43,9 @@ const filteredResources = computed(() => resourceFilter.value === '全部'
   ? resources.value
   : resources.value.filter((resource) => resource.status === resourceFilter.value))
 const publishedCount = computed(() => resources.value.filter((resource) => resource.status === '已上线').length)
+const recommendableCount = computed(() => resources.value.filter((resource) => (
+  resource.statusCode === 'PUBLISHED' && resource.availabilityStatus !== 'SOLD_OUT'
+)).length)
 
 const tasks = [
   { title: '补充雨天接待方案', detail: '运河夜游讲解服务', level: '今日处理' },
@@ -62,8 +72,34 @@ const newResource = reactive({
   name: '',
   category: 'EXPERIENCE',
   district: '拱墅区',
+  placeQuery: '',
+  placeName: '',
+  amapPoiId: '',
+  address: '',
+  longitude: null,
+  latitude: null,
   summary: '',
   tags: '非遗体验、需预约',
+  openHours: '09:00-17:00',
+  priceMin: 0,
+  priceMax: 0,
+  reservationRequired: true,
+  dailyCapacity: 30,
+  availableCapacity: 18,
+})
+
+const editingResource = reactive({
+  id: null,
+  name: '',
+  category: 'EXPERIENCE',
+  summary: '',
+  tags: '',
+  openHours: '',
+  priceMin: 0,
+  priceMax: 0,
+  reservationRequired: false,
+  dailyCapacity: null,
+  availableCapacity: null,
 })
 
 const categoryOptions = [
@@ -91,7 +127,110 @@ function toViewResource(resource) {
     statusCode: resource.status,
     score: resource.qualityScore,
     tags: resource.tags ?? [],
+    placeName: resource.placeName,
+    locationStatus: resource.locationStatus,
+    amapPoiId: resource.amapPoiId,
+    address: resource.address,
+    summary: resource.summary,
+    openHours: resource.openHours,
+    priceMin: Number(resource.priceMin ?? 0),
+    priceMax: Number(resource.priceMax ?? 0),
+    reservationRequired: resource.reservationRequired,
+    dailyCapacity: resource.dailyCapacity,
+    availableCapacity: resource.availableCapacity,
+    availabilityStatus: resource.availabilityStatus,
+    availabilityLabel: resource.availabilityLabel,
   }
+}
+
+function operatingPayload(form) {
+  const reservationRequired = Boolean(form.reservationRequired)
+  return {
+    openHours: form.openHours?.trim() || null,
+    priceMin: Number(form.priceMin ?? 0),
+    priceMax: Number(form.priceMax ?? 0),
+    reservationRequired,
+    dailyCapacity: reservationRequired ? Number(form.dailyCapacity) : null,
+    availableCapacity: reservationRequired ? Number(form.availableCapacity) : null,
+  }
+}
+
+function validateOperatingForm(form) {
+  if (Number(form.priceMax) < Number(form.priceMin)) {
+    showToast('最高价格不能低于最低价格')
+    return false
+  }
+  if (form.reservationRequired
+      && (!Number.isFinite(Number(form.dailyCapacity))
+        || Number(form.dailyCapacity) <= 0
+        || !Number.isFinite(Number(form.availableCapacity))
+        || Number(form.availableCapacity) < 0
+        || Number(form.availableCapacity) > Number(form.dailyCapacity))) {
+    showToast('请检查每日容量和当前余量')
+    return false
+  }
+  return true
+}
+
+function openNewResourceModal() {
+  resourceModalOpen.value = true
+  poiResults.value = []
+  poiSearchError.value = ''
+}
+
+function openResourceEditor(resource) {
+  Object.assign(editingResource, {
+    id: resource.id,
+    name: resource.name,
+    category: resource.category,
+    summary: resource.summary,
+    tags: resource.tags.join('、'),
+    openHours: resource.openHours ?? '',
+    priceMin: resource.priceMin,
+    priceMax: resource.priceMax,
+    reservationRequired: resource.reservationRequired,
+    dailyCapacity: resource.dailyCapacity ?? 30,
+    availableCapacity: resource.availableCapacity ?? 18,
+  })
+  resourceEditorOpen.value = true
+}
+
+async function searchResourcePoi() {
+  if (!newResource.placeQuery.trim()) {
+    showToast('请输入景点或商户名称后再搜索')
+    return
+  }
+  poiSearching.value = true
+  poiSearchError.value = ''
+  poiResults.value = []
+  newResource.amapPoiId = ''
+  try {
+    const AMap = await loadAmap()
+    poiResults.value = await searchAmapPois(AMap, {
+      keyword: newResource.placeQuery,
+      city: '杭州',
+      pageSize: 6,
+    })
+    if (!poiResults.value.length) {
+      poiSearchError.value = '没有找到对应地点，请尝试使用高德地图中的完整名称。'
+    }
+  } catch (error) {
+    poiSearchError.value = error.message || '高德地点搜索暂不可用'
+  } finally {
+    poiSearching.value = false
+  }
+}
+
+function selectResourcePoi(poi) {
+  newResource.placeQuery = poi.name
+  newResource.placeName = poi.name
+  newResource.amapPoiId = poi.id
+  newResource.address = poi.address
+  newResource.longitude = poi.longitude
+  newResource.latitude = poi.latitude
+  if (poi.district) newResource.district = poi.district
+  poiResults.value = []
+  poiSearchError.value = ''
 }
 
 async function loadResources() {
@@ -122,6 +261,11 @@ async function addResource() {
     showToast('请先填写资源名称')
     return
   }
+  if (!newResource.amapPoiId) {
+    showToast('请先从高德搜索结果中选择真实地点')
+    return
+  }
+  if (!validateOperatingForm(newResource)) return
   resourceSaving.value = true
   try {
     const created = await createMerchantResource({
@@ -129,12 +273,31 @@ async function addResource() {
       name: newResource.name.trim(),
       category: newResource.category,
       district: newResource.district,
+      placeName: newResource.placeName,
+      amapPoiId: newResource.amapPoiId,
+      address: newResource.address,
+      longitude: newResource.longitude,
+      latitude: newResource.latitude,
       summary: newResource.summary.trim(),
       tags: newResource.tags.split(/[、,，]/).map((tag) => tag.trim()).filter(Boolean),
+      ...operatingPayload(newResource),
     })
     resources.value.unshift(toViewResource(created))
     newResource.name = ''
+    newResource.placeQuery = ''
+    newResource.placeName = ''
+    newResource.amapPoiId = ''
+    newResource.address = ''
+    newResource.longitude = null
+    newResource.latitude = null
     newResource.summary = ''
+    newResource.openHours = '09:00-17:00'
+    newResource.priceMin = 0
+    newResource.priceMax = 0
+    newResource.reservationRequired = true
+    newResource.dailyCapacity = 30
+    newResource.availableCapacity = 18
+    poiResults.value = []
     resourceModalOpen.value = false
     activeSection.value = 'resources'
     showToast('资源已写入数据库，完善后即可上线')
@@ -142,6 +305,34 @@ async function addResource() {
     showToast(error.message || '资源创建失败')
   } finally {
     resourceSaving.value = false
+  }
+}
+
+async function saveResource() {
+  if (!editingResource.name.trim() || !editingResource.summary.trim()) {
+    showToast('资源名称和体验简介不能为空')
+    return
+  }
+  if (!validateOperatingForm(editingResource)) return
+  resourceEditing.value = true
+  try {
+    const updated = toViewResource(await updateMerchantResource(editingResource.id, {
+      name: editingResource.name.trim(),
+      category: editingResource.category,
+      summary: editingResource.summary.trim(),
+      tags: editingResource.tags.split(/[、,，]/).map((tag) => tag.trim()).filter(Boolean),
+      ...operatingPayload(editingResource),
+    }))
+    const index = resources.value.findIndex((item) => item.id === editingResource.id)
+    if (index >= 0) resources.value.splice(index, 1, updated)
+    resourceEditorOpen.value = false
+    showToast(updated.availabilityStatus === 'SOLD_OUT'
+      ? '资源已保存；因当前约满，已退出游客推荐池'
+      : '资源已保存，OpenClaw 推荐目录已同步')
+  } catch (error) {
+    showToast(error.message || '资源保存失败')
+  } finally {
+    resourceEditing.value = false
   }
 }
 
@@ -208,7 +399,7 @@ onMounted(async () => {
         </div>
         <div class="topbar-actions">
           <RouterLink :to="{ name: 'travel-home' }">查看游客端</RouterLink>
-          <button type="button" @click="resourceModalOpen = true">+ 新增文旅资源</button>
+          <button type="button" @click="openNewResourceModal">+ 新增文旅资源</button>
         </div>
       </header>
 
@@ -264,13 +455,13 @@ onMounted(async () => {
       <section v-else-if="activeSection === 'resources'" class="module-content resources-module">
         <div class="module-intro">
           <div><span>RESOURCE LIBRARY</span><h2>让每条资源都可被 AI 准确理解</h2><p>统一维护开放状态、服务标签和来源信息，决定资源是否进入游客推荐池。</p></div>
-          <div class="module-stat"><strong>{{ publishedCount }}/{{ resources.length }}</strong><small>当前上线</small></div>
+          <div class="module-stat"><strong>{{ recommendableCount }}/{{ publishedCount }}</strong><small>可推荐 / 已上线</small></div>
         </div>
         <div class="module-toolbar">
           <div class="filter-tabs">
             <button v-for="filter in ['全部', '已上线', '待完善', '已停用']" :key="filter" :class="{ active: resourceFilter === filter }" type="button" @click="resourceFilter = filter">{{ filter }}</button>
           </div>
-          <button type="button" @click="resourceModalOpen = true">新增资源 +</button>
+          <button type="button" @click="openNewResourceModal">新增资源 +</button>
         </div>
         <div v-if="resourceLoading" class="resource-feedback">正在读取商家资源库...</div>
         <div v-else-if="resourceError" class="resource-feedback error">
@@ -280,11 +471,25 @@ onMounted(async () => {
         <div class="resource-management-list">
           <article v-for="resource in filteredResources" :key="resource.id">
             <div class="resource-score"><strong>{{ resource.score }}</strong><small>质量分</small></div>
-            <div class="resource-copy"><span>{{ resource.type }} · {{ resource.area }}</span><h3>{{ resource.name }}</h3><div><b v-for="tag in resource.tags" :key="tag">{{ tag }}</b></div></div>
+            <div class="resource-copy">
+              <span>{{ resource.type }} · {{ resource.area }}</span><h3>{{ resource.name }}</h3>
+              <small>{{ resource.locationStatus === 'VERIFIED' ? '高德真实地点' : '待核验地点' }} · {{ resource.placeName }}</small>
+              <div><b v-for="tag in resource.tags" :key="tag">{{ tag }}</b></div>
+              <div class="resource-operating-meta">
+                <span>{{ resource.openHours || '开放时间待补充' }}</span>
+                <span>¥{{ resource.priceMin }}–{{ resource.priceMax }}</span>
+                <strong :class="{ alert: resource.availabilityStatus === 'SOLD_OUT' }">
+                  {{ resource.availabilityLabel }}<template v-if="resource.reservationRequired"> · 余 {{ resource.availableCapacity }}/{{ resource.dailyCapacity }}</template>
+                </strong>
+              </div>
+            </div>
             <span :class="['resource-status', { pending: resource.status !== '已上线' }]">{{ resource.status }}</span>
-            <button type="button" :disabled="updatingResourceId === resource.id" @click="toggleResourceStatus(resource)">
-              {{ updatingResourceId === resource.id ? '处理中...' : resource.statusCode === 'PUBLISHED' ? '下线' : '上线' }} →
-            </button>
+            <div class="resource-actions">
+              <button type="button" @click="openResourceEditor(resource)">编辑</button>
+              <button type="button" :disabled="updatingResourceId === resource.id" @click="toggleResourceStatus(resource)">
+                {{ updatingResourceId === resource.id ? '处理中...' : resource.statusCode === 'PUBLISHED' ? '下线' : '上线' }}
+              </button>
+            </div>
           </article>
         </div>
       </section>
@@ -333,12 +538,66 @@ onMounted(async () => {
         <span>NEW RESOURCE</span>
         <h2>新增文旅资源</h2>
         <p>基础信息将直接写入资源库，审核上线后即可参与游客行程推荐。</p>
-        <label><span>资源名称</span><input v-model.trim="newResource.name" placeholder="例如：杭州扇艺手作体验" /></label>
+        <label><span>资源或体验名称</span><input v-model.trim="newResource.name" placeholder="例如：运河蓝染亲子体验" /></label>
+        <label>
+          <span>高德真实地点</span>
+          <div class="poi-search-row">
+            <input v-model.trim="newResource.placeQuery" placeholder="搜索体验实际发生的场馆或门店" @keyup.enter.prevent="searchResourcePoi" />
+            <button type="button" :disabled="poiSearching" @click="searchResourcePoi">{{ poiSearching ? '搜索中' : '搜索' }}</button>
+          </div>
+        </label>
+        <div v-if="poiResults.length" class="poi-result-list">
+          <button v-for="poi in poiResults" :key="poi.id" type="button" @click="selectResourcePoi(poi)">
+            <strong>{{ poi.name }}</strong><small>{{ poi.address || poi.district || '杭州' }}</small>
+          </button>
+        </div>
+        <p v-if="poiSearchError" class="poi-search-error">{{ poiSearchError }}</p>
+        <div v-if="newResource.amapPoiId" class="selected-poi">
+          <span>已绑定高德 POI</span><strong>{{ newResource.placeName }}</strong>
+          <small>{{ newResource.address || newResource.district }} · {{ newResource.longitude.toFixed(6) }}, {{ newResource.latitude.toFixed(6) }}</small>
+          <small>POI ID · {{ newResource.amapPoiId }}</small>
+        </div>
         <label><span>资源类型</span><select v-model="newResource.category"><option v-for="option in categoryOptions" :key="option.value" :value="option.value">{{ option.label }}</option></select></label>
-        <label><span>所在区域</span><select v-model="newResource.district"><option>拱墅区</option><option>西湖区</option><option>上城区</option><option>余杭区</option></select></label>
+        <label><span>所在区域</span><input v-model.trim="newResource.district" placeholder="选择地点后自动填写" /></label>
         <label><span>体验简介</span><textarea v-model.trim="newResource.summary" rows="3" placeholder="说明体验内容、适合人群和建议停留时间"></textarea></label>
         <label><span>资源标签</span><input v-model.trim="newResource.tags" placeholder="使用顿号分隔，例如：亲子友好、需预约" /></label>
+        <div class="modal-grid">
+          <label><span>开放时间</span><input v-model.trim="newResource.openHours" placeholder="例如：09:00-17:00" /></label>
+          <label><span>价格区间（元）</span><div class="price-row"><input v-model.number="newResource.priceMin" min="0" type="number" /><i>至</i><input v-model.number="newResource.priceMax" min="0" type="number" /></div></label>
+        </div>
+        <label class="reservation-switch"><input v-model="newResource.reservationRequired" type="checkbox" /><span>该资源需要预约，并按当前余量参与推荐</span></label>
+        <div v-if="newResource.reservationRequired" class="modal-grid">
+          <label><span>每日接待容量</span><input v-model.number="newResource.dailyCapacity" min="1" type="number" /></label>
+          <label><span>当前可预约余量</span><input v-model.number="newResource.availableCapacity" min="0" type="number" /></label>
+        </div>
         <button class="modal-submit" type="submit" :disabled="resourceSaving">{{ resourceSaving ? '正在写入资源库...' : '创建并继续完善 →' }}</button>
+      </form>
+    </div>
+    <div v-if="resourceEditorOpen" class="resource-modal-backdrop" @click.self="resourceEditorOpen = false">
+      <form class="resource-modal resource-editor" @submit.prevent="saveResource">
+        <button type="button" @click="resourceEditorOpen = false">×</button>
+        <span>RESOURCE OPERATIONS</span>
+        <h2>编辑经营信息</h2>
+        <p>保存后会同步到游客推荐池和 OpenClaw 资源目录；余量为 0 时自动停止推荐。</p>
+        <label><span>资源或体验名称</span><input v-model.trim="editingResource.name" /></label>
+        <label><span>资源类型</span><select v-model="editingResource.category"><option v-for="option in categoryOptions" :key="option.value" :value="option.value">{{ option.label }}</option></select></label>
+        <label><span>体验简介</span><textarea v-model.trim="editingResource.summary" rows="4"></textarea></label>
+        <label><span>资源标签</span><input v-model.trim="editingResource.tags" placeholder="使用顿号分隔" /></label>
+        <div class="modal-grid">
+          <label><span>开放时间</span><input v-model.trim="editingResource.openHours" placeholder="例如：09:00-17:00" /></label>
+          <label><span>价格区间（元）</span><div class="price-row"><input v-model.number="editingResource.priceMin" min="0" type="number" /><i>至</i><input v-model.number="editingResource.priceMax" min="0" type="number" /></div></label>
+        </div>
+        <label class="reservation-switch"><input v-model="editingResource.reservationRequired" type="checkbox" /><span>需要预约，并按当前余量参与游客推荐</span></label>
+        <div v-if="editingResource.reservationRequired" class="capacity-panel">
+          <div class="modal-grid">
+            <label><span>每日接待容量</span><input v-model.number="editingResource.dailyCapacity" min="1" type="number" /></label>
+            <label><span>当前可预约余量</span><input v-model.number="editingResource.availableCapacity" min="0" type="number" /></label>
+          </div>
+          <p :class="{ alert: Number(editingResource.availableCapacity) === 0 }">
+            {{ Number(editingResource.availableCapacity) === 0 ? '保存后该资源会立即退出游客推荐池。' : '保存后余量会同步给 OpenClaw 规划目录。' }}
+          </p>
+        </div>
+        <button class="modal-submit" type="submit" :disabled="resourceEditing">{{ resourceEditing ? '正在同步...' : '保存并同步推荐目录 →' }}</button>
       </form>
     </div>
   </main>
@@ -439,19 +698,26 @@ onMounted(async () => {
 .filter-tabs button { padding: 7px 12px; border: 1px solid rgba(38, 51, 46, .12); border-radius: 999px; background: rgba(255, 255, 255, .4); color: #697069; cursor: pointer; font-family: inherit; font-size: 9px; }
 .filter-tabs button.active { border-color: var(--merchant-green); background: var(--merchant-green); color: #fffaf1; }
 .resource-management-list { display: grid; gap: 9px; }
-.resource-management-list article { display: grid; grid-template-columns: 64px minmax(0, 1fr) 72px 58px; align-items: center; gap: 15px; padding: 15px 18px; border: 1px solid rgba(38, 51, 46, .08); border-radius: 12px; background: rgba(252, 250, 245, .76); transition: transform .2s, box-shadow .2s; }
+.resource-management-list article { display: grid; grid-template-columns: 64px minmax(0, 1fr) 72px 86px; align-items: center; gap: 15px; padding: 15px 18px; border: 1px solid rgba(38, 51, 46, .08); border-radius: 12px; background: rgba(252, 250, 245, .76); transition: transform .2s, box-shadow .2s; }
 .resource-management-list article:hover { transform: translateY(-2px); box-shadow: 0 12px 26px rgba(38, 51, 46, .07); }
 .resource-score { display: grid; width: 52px; height: 52px; place-content: center; border: 1px solid rgba(49, 91, 80, .2); border-radius: 50%; text-align: center; }
 .resource-score strong { color: var(--merchant-green); font-size: 18px; }
 .resource-score small { color: #8b8d86; font-size: 7px; }
 .resource-copy > span { color: #8b8177; font-size: 8px; letter-spacing: 1px; }
 .resource-copy h3 { margin: 3px 0 7px; font-size: 14px; }
+.resource-copy > small { display: block; margin: -3px 0 7px; color: #747d76; font-size: 8px; }
 .resource-copy div { display: flex; flex-wrap: wrap; gap: 5px; }
 .resource-copy b { padding: 3px 6px; border-radius: 999px; background: #ede7db; color: #70766f; font-size: 7px; font-weight: 500; }
+.resource-copy .resource-operating-meta { align-items: center; gap: 8px; margin-top: 9px; color: #747b74; font-size: 8px; }
+.resource-operating-meta span { padding-right: 8px; border-right: 1px solid rgba(38, 51, 46, .12); }
+.resource-operating-meta strong { color: var(--merchant-green); font-size: 8px; font-weight: 600; }
+.resource-operating-meta strong.alert { color: var(--merchant-red); }
 .resource-status { justify-self: start; padding: 5px 8px; border-radius: 999px; background: #e6efe7; color: #44705a; font-size: 8px; }
 .resource-status.pending { background: #f3e5db; color: #9a5542; }
-.resource-management-list article > button { border: 0; background: transparent; color: var(--merchant-green); cursor: pointer; font-family: inherit; font-size: 9px; }
-.resource-management-list article > button:disabled { cursor: wait; opacity: .55; }
+.resource-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; }
+.resource-actions button { padding: 6px 4px; border: 1px solid rgba(49, 91, 80, .18); border-radius: 6px; background: rgba(255, 255, 255, .38); color: var(--merchant-green); cursor: pointer; font-family: inherit; font-size: 8px; }
+.resource-actions button:last-child { border-color: transparent; background: var(--merchant-green); color: #fffaf1; }
+.resource-actions button:disabled { cursor: wait; opacity: .55; }
 .resource-feedback { display: flex; align-items: center; justify-content: space-between; min-height: 68px; padding: 16px 18px; border: 1px dashed rgba(49, 91, 80, .2); border-radius: 12px; color: #70766f; font-size: 10px; }
 .resource-feedback.error { border-color: rgba(170, 71, 56, .25); color: var(--merchant-red); }
 .resource-feedback button { padding: 7px 11px; border: 0; border-radius: 7px; background: var(--merchant-green); color: #fffaf1; cursor: pointer; font-family: inherit; font-size: 9px; }
@@ -506,15 +772,37 @@ onMounted(async () => {
 .merchant-toast-enter-active, .merchant-toast-leave-active { transition: opacity .25s, transform .25s; }
 .merchant-toast-enter-from, .merchant-toast-leave-to { opacity: 0; transform: translateY(8px); }
 .resource-modal-backdrop { position: fixed; inset: 0; z-index: 70; display: grid; place-items: center; padding: 20px; background: rgba(28, 35, 32, .42); backdrop-filter: blur(6px); }
-.resource-modal { position: relative; display: grid; gap: 14px; width: min(440px, 100%); padding: 29px; border-radius: 16px; background: #f7f2e8; box-shadow: 0 24px 70px rgba(28, 35, 32, .25); }
+.resource-modal { position: relative; display: grid; gap: 14px; width: min(520px, 100%); max-height: calc(100vh - 40px); overflow-y: auto; padding: 29px; border-radius: 16px; background: #f7f2e8; box-shadow: 0 24px 70px rgba(28, 35, 32, .25); }
 .resource-modal > button:first-child { position: absolute; top: 13px; right: 15px; border: 0; background: transparent; color: #7d817b; cursor: pointer; font-size: 18px; }
 .resource-modal > span { color: var(--merchant-red); font-size: 8px; letter-spacing: 3px; }
 .resource-modal h2 { margin-top: -7px; font-size: 24px; }
 .resource-modal > p { color: #737a73; font-size: 10px; line-height: 1.7; }
 .resource-modal label { display: grid; gap: 6px; }
 .resource-modal label > span { color: #6e756e; font-size: 9px; }
+.poi-search-row { display: grid; grid-template-columns: 1fr auto; gap: 7px; }
+.poi-search-row button { padding: 0 16px; border: 0; border-radius: 8px; background: var(--merchant-green); color: #fffaf1; cursor: pointer; font-family: inherit; font-size: 10px; }
+.poi-search-row button:disabled { cursor: wait; opacity: .6; }
+.poi-result-list { display: grid; gap: 5px; max-height: 190px; overflow-y: auto; padding: 5px; border: 1px solid rgba(49, 91, 80, .12); border-radius: 9px; background: rgba(255, 255, 255, .44); }
+.poi-result-list button { display: grid; gap: 3px; padding: 9px 10px; border: 0; border-radius: 7px; background: transparent; color: var(--merchant-ink); cursor: pointer; font-family: inherit; text-align: left; }
+.poi-result-list button:hover { background: rgba(49, 91, 80, .08); }
+.poi-result-list strong { font-size: 10px; }
+.poi-result-list small { color: #7b817a; font-size: 8px; }
+.poi-search-error { margin: -6px 0 0 !important; color: var(--merchant-red) !important; font-size: 9px !important; }
+.selected-poi { display: grid; gap: 3px; padding: 11px 12px; border-left: 3px solid var(--merchant-green); border-radius: 6px; background: rgba(49, 91, 80, .07); }
+.selected-poi span { color: var(--merchant-green); font-size: 8px; letter-spacing: 1px; }
+.selected-poi strong { font-size: 11px; }
+.selected-poi small { color: #727a73; font-size: 8px; }
 .resource-modal .modal-submit { padding: 11px; border: 0; border-radius: 8px; background: var(--merchant-green); color: #fffaf1; cursor: pointer; font-family: inherit; font-size: 10px; }
 .resource-modal .modal-submit:disabled { cursor: wait; opacity: .6; }
+.modal-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.price-row { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 6px; }
+.price-row i { color: #8a8e88; font-size: 8px; font-style: normal; }
+.resource-modal .reservation-switch { display: flex; align-items: center; gap: 9px; padding: 11px 12px; border: 1px solid rgba(49, 91, 80, .12); border-radius: 8px; background: rgba(49, 91, 80, .05); cursor: pointer; }
+.resource-modal .reservation-switch input { width: 14px; height: 14px; margin: 0; accent-color: var(--merchant-green); }
+.resource-modal .reservation-switch span { color: var(--merchant-green); }
+.capacity-panel { display: grid; gap: 8px; padding: 12px; border-left: 3px solid var(--merchant-green); border-radius: 7px; background: rgba(49, 91, 80, .05); }
+.capacity-panel > p { margin: 0; color: #66716a; font-size: 8px; }
+.capacity-panel > p.alert { color: var(--merchant-red); font-weight: 600; }
 
 @media (max-width: 1050px) {
   .merchant-app { grid-template-columns: 78px 1fr; }
@@ -522,8 +810,9 @@ onMounted(async () => {
   .merchant-brand div, .merchant-sidebar nav button:not(.active) { font-size: 0; }
   .merchant-sidebar nav button { justify-content: center; }
   .merchant-sidebar nav button.active { font-size: 0; }
-  .merchant-user div, .merchant-user button { display: none; }
+  .merchant-user div { display: none; }
   .merchant-user { grid-template-columns: 1fr; justify-items: center; }
+  .merchant-user button { width: 100%; padding-top: 5px; font-size: 8px; }
   .metric-grid { grid-template-columns: 1fr 1fr; }
   .dashboard-grid { grid-template-columns: 1fr; }
   .product-grid { grid-template-columns: 1fr 1fr; }
@@ -551,8 +840,10 @@ onMounted(async () => {
   .module-toolbar { align-items: flex-start; gap: 10px; }
   .filter-tabs { flex-wrap: wrap; }
   .resource-management-list article { grid-template-columns: 48px 1fr auto; }
-  .resource-management-list article > button { display: none; }
+  .resource-status { display: none; }
+  .resource-actions { grid-column: 2 / -1; grid-template-columns: 1fr 1fr; }
   .resource-score { width: 42px; height: 42px; }
+  .modal-grid { grid-template-columns: 1fr; }
   .product-grid { grid-template-columns: 1fr; }
 }
 </style>

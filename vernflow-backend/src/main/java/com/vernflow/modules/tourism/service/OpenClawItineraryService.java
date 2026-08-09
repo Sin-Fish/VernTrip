@@ -32,7 +32,8 @@ public class OpenClawItineraryService {
             你是 VernTrip 的结构化行程编排 Agent。
             必须先调用 verntrip_tourism_catalog_read 读取目的地资源，只能使用工具返回的资源名称。
             根据游客的日期、天数、同行人群、预算、节奏和兴趣，安排一份可执行的一至两日行程。
-            每天安排 3 至 4 个节点；两日行程至少包含一项住宿；避免同一资源重复出现。
+            每天安排 3 至 4 个游览、餐饮或体验节点；两日行程的第 1 天可额外安排 1 个住宿节点，因此最多 5 个节点。
+            两日行程必须包含且仅包含一项住宿；避免同一资源重复出现。
             cost 表示本次同行人群在该节点的预计总费用，所有节点费用之和不得超过总预算的 85%。
             最终只输出一个 JSON 对象，不要输出 Markdown、代码围栏、解释或额外文字。
             JSON 格式必须严格为：
@@ -55,6 +56,20 @@ public class OpenClawItineraryService {
                 }
               ]
             }
+            """;
+    private static final String REPLACEMENT_INSTRUCTIONS = """
+            你是 VernTrip 的局部行程调整 Agent。
+            只能从用户消息给出的候选资源中选择一个替换当前节点，不得改动其他节点。
+            结合同行人群、兴趣、补充要求、候选资源介绍和已锁定节点，选择最合适且不重复的资源。
+            最终只输出一个 JSON 对象，不要输出 Markdown、代码围栏或额外文字。
+            JSON 格式必须严格为：
+            {
+              "resourceName":"候选资源的完整名称",
+              "satisfiesRequest":true,
+              "reason":"不超过100字的替换理由"
+            }
+            如果候选资源都无法满足用户的明确要求，satisfiesRequest 必须为 false，reason 说明缺少什么资源；
+            不得为了完成替换而声称不匹配的候选符合要求。
             """;
 
     private final OpenClawProperties openClawProperties;
@@ -113,12 +128,102 @@ public class OpenClawItineraryService {
         }
     }
 
+    public Optional<AgentReplacement> selectReplacement(
+            Long userId,
+            TripRequest request,
+            TourismResource currentResource,
+            List<TourismResource> candidates,
+            List<String> lockedResourceNames,
+            String note
+    ) {
+        if (!openClawProperties.primaryEnabled() || candidates.isEmpty()) {
+            return Optional.empty();
+        }
+
+        try {
+            OpenClawSessionContextService.BoundSession session = sessionContextService.bind(
+                    userId,
+                    null,
+                    false,
+                    List.of()
+            );
+            OpenClawGatewayClient.ShadowResponse response = gatewayClient.createResponse(
+                    session.sessionKey(),
+                    buildReplacementPrompt(request, currentResource, candidates, lockedResourceNames, note),
+                    REPLACEMENT_INSTRUCTIONS
+            );
+            JsonNode root = objectMapper.readTree(extractJson(response.text()));
+            String resourceName = requiredText(root, "resourceName", 160);
+            boolean validCandidate = candidates.stream()
+                    .anyMatch(candidate -> candidate.getName().equals(resourceName));
+            if (!validCandidate) {
+                throw new InvalidAgentPlanException("replacement_resource_invalid");
+            }
+            JsonNode satisfiesRequest = root.path("satisfiesRequest");
+            if (!satisfiesRequest.isBoolean()) {
+                throw new InvalidAgentPlanException("replacement_satisfaction_invalid");
+            }
+            return Optional.of(new AgentReplacement(
+                    resourceName,
+                    satisfiesRequest.asBoolean(),
+                    requiredText(root, "reason", 500)
+            ));
+        } catch (RuntimeException exception) {
+            LOGGER.warn("OpenClaw node replacement fell back to local rules: {}", exception.getMessage());
+            return Optional.empty();
+        } catch (Exception exception) {
+            LOGGER.warn("OpenClaw node replacement response was invalid: {}", exception.getMessage());
+            return Optional.empty();
+        }
+    }
+
+    private String buildReplacementPrompt(
+            TripRequest request,
+            TourismResource currentResource,
+            List<TourismResource> candidates,
+            List<String> lockedResourceNames,
+            String note
+    ) {
+        StringBuilder candidateLines = new StringBuilder();
+        for (TourismResource candidate : candidates) {
+            candidateLines.append("- ")
+                    .append(candidate.getName())
+                    .append("｜区域：").append(candidate.getDistrict())
+                    .append("｜介绍：").append(candidate.getSummary())
+                    .append("｜标签：").append(candidate.getTagsJson())
+                    .append("｜价格：").append(candidate.getPriceMin())
+                    .append("-").append(candidate.getPriceMax())
+                    .append("元\n");
+        }
+        return """
+                请只替换下面这个行程节点：
+                当前节点：%s
+                当前类型：%s
+                同行人群：%s
+                兴趣：%s
+                用户补充要求：%s
+                其余已锁定节点：%s
+
+                可选资源：
+                %s
+                """.formatted(
+                currentResource.getName(),
+                currentResource.getCategory(),
+                request.getTravelerType(),
+                request.getInterestsJson(),
+                textOrNone(note),
+                lockedResourceNames,
+                candidateLines
+        );
+    }
+
     private String buildRepairPrompt(String validationCode, String previousResponse) {
         return """
                 Your previous itinerary JSON was rejected by VernTrip with validation code: %s.
                 Regenerate the complete JSON object from scratch and output JSON only.
                 Hard constraints:
-                - each day must contain 3 or 4 items, never 5;
+                - each day must contain 3 or 4 activity items;
+                - day 1 may contain a fifth item only when that item is the trip's single lodging resource;
                 - a two-day trip must contain exactly one lodging item and it must be on day 1;
                 - resourceName must exactly match the catalog and cannot be repeated;
                 - total cost must stay within 85%% of the user's budget.
@@ -183,7 +288,8 @@ public class OpenClawItineraryService {
                 JsonNode day = days.get(dayIndex);
                 int dayNumber = day.path("day").asInt(-1);
                 JsonNode items = day.path("items");
-                if (dayNumber != dayIndex + 1 || !items.isArray() || items.size() < 3 || items.size() > 4) {
+                int maxItems = request.getDays() > 1 && dayNumber == 1 ? 5 : 4;
+                if (dayNumber != dayIndex + 1 || !items.isArray() || items.size() < 3 || items.size() > maxItems) {
                     throw new InvalidAgentPlanException("day_items_invalid");
                 }
 
@@ -273,6 +379,13 @@ public class OpenClawItineraryService {
             String summary,
             int matchScore,
             List<AgentStop> stops
+    ) {
+    }
+
+    public record AgentReplacement(
+            String resourceName,
+            boolean satisfiesRequest,
+            String reason
     ) {
     }
 

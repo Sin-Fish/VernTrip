@@ -12,6 +12,8 @@ public interface TourismResourceRepository extends JpaRepository<TourismResource
 
     boolean existsByCityIgnoreCaseAndNameIgnoreCase(String city, String name);
 
+    boolean existsByCityIgnoreCaseAndNameIgnoreCaseAndIdNot(String city, String name, Long id);
+
     List<TourismResource> findAllByCityIgnoreCaseAndStatusOrderByIdAsc(
             String city,
             TourismResource.PublicationStatus status
