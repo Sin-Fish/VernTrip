@@ -2,6 +2,7 @@ import { computed, reactive } from "vue";
 import {
   adjustTravelPlan,
   createTravelPlan,
+  getTravelPlan,
   listSavedTravelPlans,
   removeSavedTravelPlan,
   saveTravelPlan,
@@ -63,6 +64,7 @@ const state = reactive({
   isGenerating: false,
   isSaving: false,
   isLoadingSavedPlans: false,
+  isLoadingPlan: false,
   hasGenerated: false,
   error: "",
 });
@@ -134,6 +136,32 @@ async function adjustCurrentPlan(adjustment) {
   }
 }
 
+async function loadPlan(planId) {
+  const normalizedId = Number(planId);
+  if (!Number.isInteger(normalizedId) || normalizedId <= 0) {
+    state.error = "行程编号无效。";
+    return null;
+  }
+
+  if (state.currentPlan?.id === normalizedId) {
+    return state.currentPlan;
+  }
+
+  state.isLoadingPlan = true;
+  state.error = "";
+  try {
+    const plan = await getTravelPlan(normalizedId);
+    restorePlan(plan);
+    state.hasGenerated = true;
+    return plan;
+  } catch (error) {
+    state.error = error.message || "暂时无法读取这份行程。";
+    return null;
+  } finally {
+    state.isLoadingPlan = false;
+  }
+}
+
 async function saveCurrentPlan() {
   if (!state.currentPlan) {
     return null;
@@ -199,6 +227,7 @@ export function useTravelPlanning() {
     applyTheme,
     updateRequest,
     generatePlan,
+    loadPlan,
     adjustCurrentPlan,
     saveCurrentPlan,
     loadSavedPlans,

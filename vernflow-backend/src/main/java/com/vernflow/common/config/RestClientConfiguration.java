@@ -33,6 +33,15 @@ public class RestClientConfiguration {
         );
     }
 
+    @Bean
+    @Qualifier("amapRestClient")
+    public RestClient amapRestClient(AmapWebServiceProperties properties) {
+        return buildRestClient(
+                properties.baseUrl().toString(),
+                properties.effectiveTimeout().toMillis()
+        );
+    }
+
     private RestClient buildRestClient(String baseUrl, long timeoutMillis) {
         SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
         int timeout = Math.toIntExact(Math.min(timeoutMillis, Integer.MAX_VALUE));

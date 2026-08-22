@@ -13,6 +13,7 @@
       <RouterLink class="nav-btn ai-special" :to="{ name: 'travel-planner' }">
         <span class="brush-icon" aria-hidden="true">✦</span>AI 个性规划
       </RouterLink>
+      <RouterLink v-if="loggedIn && role === 'TOURIST'" class="nav-btn" :to="{ name: 'travel-trips' }">我的行程</RouterLink>
       <RouterLink v-if="!loggedIn" class="nav-btn account-link" :to="{ name: 'login' }">登录</RouterLink>
       <RouterLink v-else-if="role === 'MERCHANT'" class="nav-btn account-link" :to="{ name: 'merchant-home' }">商家端</RouterLink>
       <button v-else class="nav-btn account-link" type="button" @click="logout">退出</button>
@@ -71,5 +72,6 @@ async function logout() {
   .logo strong { font-size: 25px; }
   .nav-btn { padding: 7px 10px; font-size: 11px; }
   .nav-actions .nav-btn:first-child { display: none; }
+  .nav-actions .nav-btn:not(.ai-special):not(.account-link) { display: none; }
 }
 </style>

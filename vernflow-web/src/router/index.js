@@ -10,6 +10,7 @@ import WorkbenchPage from "@/pages/WorkbenchPage.vue";
 import MerchantHomePage from "@/features/merchant/pages/MerchantHomePage.vue";
 import TourismHomePage from "@/features/tourism/pages/HomeView.vue";
 import TourismPlannerPage from "@/features/tourism/pages/PlanView.vue";
+import TourismTripsPage from "@/features/tourism/pages/TripsView.vue";
 
 const internalMeta = (title) => ({ title, description: "", requiredRole: "INTERNAL" });
 
@@ -51,13 +52,15 @@ const routes = [
   },
   {
     path: "/travel/trips",
-    redirect: { name: "travel-home" },
+    name: "travel-trips",
+    component: TourismTripsPage,
+    meta: { tourismShell: true, requiredRole: "TOURIST", title: "我的行程" },
   },
   {
     path: "/travel/itinerary",
     name: "travel-plan",
     component: TripPlanPage,
-    meta: { public: true, title: "旅行计划" },
+    meta: { public: true, tourismShell: true, title: "旅行计划" },
   },
   {
     path: "/merchant",

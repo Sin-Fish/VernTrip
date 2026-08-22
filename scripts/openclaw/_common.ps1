@@ -46,7 +46,7 @@ function Initialize-RuntimeSecrets {
 }
 
 function Import-OpenClawProviderEnvironment {
-    $supportedNames = @("DEEPSEEK_API_KEY")
+    $supportedNames = @("DEEPSEEK_API_KEY", "AMAP_WEB_SERVICE_KEY")
     $values = @{}
     foreach ($fileName in @(".env", ".env.local")) {
         $path = Join-Path $script:RepoRoot $fileName

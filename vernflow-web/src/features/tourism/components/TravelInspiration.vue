@@ -1,0 +1,346 @@
+<script setup>
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
+import { listTourismResources } from '@/lib/travelApi'
+
+const router = useRouter()
+const cities = ['杭州', '苏州', '南京', '成都', '厦门']
+const city = ref('杭州')
+const resources = ref([])
+const selectedResource = ref(null)
+const loading = ref(false)
+const errorMessage = ref('')
+let loadSequence = 0
+
+const visualImages = [
+  '/images/banner1.jpg',
+  '/images/banner2.jpg',
+  '/images/banner3.jpg',
+  '/images/banner4.jpg',
+  '/images/banner5.jpg',
+  '/images/tripcard6.jpg',
+]
+
+const inspirationResources = computed(() => {
+  const primary = resources.value.filter((item) => !['餐饮', '住宿'].includes(item.type))
+  return (primary.length >= 6 ? primary : resources.value).slice(0, 8)
+})
+const featured = computed(() => inspirationResources.value[0] ?? null)
+const secondary = computed(() => inspirationResources.value.slice(1, 7))
+const resourceCounts = computed(() => {
+  const districts = new Set(resources.value.map((item) => item.area).filter(Boolean))
+  const verified = resources.value.filter((item) => item.locationStatus === 'VERIFIED').length
+  return { total: resources.value.length, districts: districts.size, verified }
+})
+
+function formatPrice(resource) {
+  const minimum = Number(resource?.priceMin ?? 0)
+  const maximum = Number(resource?.priceMax ?? 0)
+  if (!minimum && !maximum) return '免费或现场为准'
+  if (minimum === maximum) return `参考 ¥${minimum.toLocaleString('zh-CN')}`
+  return `参考 ¥${minimum.toLocaleString('zh-CN')}–${maximum.toLocaleString('zh-CN')}`
+}
+
+function availabilityLabel(resource) {
+  if (!resource?.reservationRequired) return '可直接前往'
+  if (resource.availabilityStatus === 'SOLD_OUT') return '当前名额已满'
+  if (resource.availabilityStatus === 'LIMITED') return '余量有限'
+  return '建议提前预约'
+}
+
+function sourceLabel(resource) {
+  return resource?.source?.includes('高德') ? '高德动态 POI' : '已审核文旅资源'
+}
+
+function amapUrl(resource) {
+  const position = `${resource.longitude},${resource.latitude}`
+  return `https://uri.amap.com/marker?position=${encodeURIComponent(position)}&name=${encodeURIComponent(resource.placeName || resource.name)}&src=verntrip&coordinate=gaode&callnative=0`
+}
+
+function plannerQuery(resource) {
+  return {
+    destination: city.value,
+    focus: resource.name,
+    interests: (resource.tags ?? []).slice(0, 3).join(','),
+  }
+}
+
+function startPlanning(resource) {
+  selectedResource.value = null
+  router.push({ name: 'travel-planner', query: plannerQuery(resource) })
+}
+
+function openDetails(resource) {
+  selectedResource.value = resource
+}
+
+function closeDetails() {
+  selectedResource.value = null
+}
+
+async function loadCity(nextCity = city.value) {
+  const sequence = ++loadSequence
+  city.value = nextCity
+  loading.value = true
+  errorMessage.value = ''
+  selectedResource.value = null
+  try {
+    const result = await listTourismResources(nextCity)
+    if (sequence !== loadSequence) return
+    resources.value = Array.isArray(result) ? result : []
+    if (!resources.value.length) errorMessage.value = '这座城市暂时没有可展示的文旅资源。'
+  } catch (error) {
+    if (sequence !== loadSequence) return
+    resources.value = []
+    errorMessage.value = error.message || '旅行灵感暂时没有加载出来。'
+  } finally {
+    if (sequence === loadSequence) loading.value = false
+  }
+}
+
+function handleKeydown(event) {
+  if (event.key === 'Escape') closeDetails()
+}
+
+onMounted(() => {
+  window.addEventListener('keydown', handleKeydown)
+  loadCity()
+})
+
+onBeforeUnmount(() => {
+  loadSequence += 1
+  window.removeEventListener('keydown', handleKeydown)
+})
+</script>
+
+<template>
+  <section class="inspiration-browser" aria-label="真实文旅资源灵感">
+    <div class="city-rail">
+      <div>
+        <span>DESTINATION INDEX</span>
+        <p>选择一座城市，读取真实地点</p>
+      </div>
+      <nav aria-label="灵感城市">
+        <button
+          v-for="option in cities"
+          :key="option"
+          :class="{ active: city === option }"
+          type="button"
+          :disabled="loading && city === option"
+          @click="loadCity(option)"
+        >
+          <small>{{ option === city ? 'NOW' : 'CITY' }}</small>
+          <b>{{ option }}</b>
+        </button>
+      </nav>
+      <div class="catalog-proof">
+        <span>{{ resourceCounts.total.toString().padStart(2, '0') }}</span>
+        <p>{{ resourceCounts.districts }} 个区域<br />{{ resourceCounts.verified }} 个坐标已核验</p>
+      </div>
+    </div>
+
+    <div v-if="loading" class="inspiration-state">
+      <i></i>
+      <b>正在翻阅{{ city }}的地方资料</b>
+      <p>高德 POI 与文旅资源库正在同步。</p>
+    </div>
+
+    <div v-else-if="errorMessage" class="inspiration-state error">
+      <span>!</span>
+      <b>这页灵感暂时空着</b>
+      <p>{{ errorMessage }}</p>
+      <button type="button" @click="loadCity(city)">重新读取</button>
+    </div>
+
+    <div v-else-if="featured" class="inspiration-layout">
+      <article class="featured-place">
+        <img :src="visualImages[0]" alt="城市旅行氛围" />
+        <div class="featured-shade"></div>
+        <div class="featured-number">01</div>
+        <div class="featured-copy">
+          <div class="place-flags">
+            <span>{{ featured.type }}</span>
+            <span>{{ featured.area || city }}</span>
+            <span>{{ sourceLabel(featured) }}</span>
+          </div>
+          <p>FEATURED PLACE / {{ city }}</p>
+          <h3>{{ featured.name }}</h3>
+          <strong>{{ featured.note }}</strong>
+          <div class="featured-actions">
+            <button type="button" @click="openDetails(featured)">查看地点资料</button>
+            <button type="button" @click="startPlanning(featured)">以这里开始规划 <b>→</b></button>
+          </div>
+        </div>
+      </article>
+
+      <div class="place-grid">
+        <article v-for="(resource, index) in secondary" :key="resource.id" class="place-card">
+          <button class="place-card-main" type="button" @click="openDetails(resource)">
+            <div class="place-card-visual">
+              <img :src="visualImages[(index + 1) % visualImages.length]" alt="" />
+              <span>{{ String(index + 2).padStart(2, '0') }}</span>
+              <mark>{{ resource.type }}</mark>
+            </div>
+            <div class="place-card-copy">
+              <small>{{ resource.area || city }} · {{ sourceLabel(resource) }}</small>
+              <h4>{{ resource.name }}</h4>
+              <p>{{ resource.note }}</p>
+              <div><span>{{ resource.openHours || '开放时间现场为准' }}</span><b>{{ formatPrice(resource) }}</b></div>
+            </div>
+          </button>
+          <button class="place-plan-button" type="button" @click="startPlanning(resource)">加入规划意向 <span>↗</span></button>
+        </article>
+      </div>
+    </div>
+
+    <Teleport to="body">
+      <Transition name="place-drawer">
+        <div v-if="selectedResource" class="place-backdrop" @click.self="closeDetails">
+          <aside class="place-detail" aria-label="景点详情">
+            <button class="detail-close" type="button" aria-label="关闭景点详情" @click="closeDetails">×</button>
+            <div class="detail-visual">
+              <img :src="visualImages[(inspirationResources.indexOf(selectedResource) + visualImages.length) % visualImages.length]" alt="城市旅行氛围" />
+              <span>{{ city }} / {{ selectedResource.area }}</span>
+            </div>
+            <div class="detail-copy">
+              <p class="detail-eyebrow">PLACE DOSSIER · {{ sourceLabel(selectedResource) }}</p>
+              <h2>{{ selectedResource.name }}</h2>
+              <p class="detail-summary">{{ selectedResource.note }}</p>
+              <div class="detail-tags">
+                <span v-for="tag in selectedResource.tags" :key="tag">{{ tag }}</span>
+              </div>
+              <dl>
+                <div><dt>实际地点</dt><dd>{{ selectedResource.placeName || selectedResource.name }}</dd></div>
+                <div><dt>地址</dt><dd>{{ selectedResource.address || `${city}${selectedResource.area || ''}` }}</dd></div>
+                <div><dt>开放时间</dt><dd>{{ selectedResource.openHours || '以现场公告为准' }}</dd></div>
+                <div><dt>参考花费</dt><dd>{{ formatPrice(selectedResource) }}</dd></div>
+                <div><dt>预约状态</dt><dd>{{ availabilityLabel(selectedResource) }}</dd></div>
+                <div><dt>坐标状态</dt><dd>{{ selectedResource.locationStatus === 'VERIFIED' ? '高德坐标已核验' : '近似坐标' }}</dd></div>
+              </dl>
+              <div class="detail-source">
+                <span>数据来源</span>
+                <b>{{ selectedResource.source }}</b>
+              </div>
+              <div class="detail-actions">
+                <a :href="amapUrl(selectedResource)" target="_blank" rel="noopener noreferrer">在高德地图查看</a>
+                <button type="button" @click="startPlanning(selectedResource)">以这里开始规划 <span>→</span></button>
+              </div>
+            </div>
+          </aside>
+        </div>
+      </Transition>
+    </Teleport>
+  </section>
+</template>
+
+<style scoped>
+.inspiration-browser { display: grid; gap: 20px; }
+.city-rail { display: grid; grid-template-columns: 200px minmax(0, 1fr) 170px; align-items: stretch; min-height: 84px; overflow: hidden; border-top: 3px solid #315b5a; background: rgba(250, 246, 237, .82); box-shadow: 0 12px 32px rgba(62, 60, 50, .06); backdrop-filter: blur(12px); }
+.city-rail > div:first-child { display: grid; align-content: center; gap: 5px; padding: 16px 20px; border-right: 1px solid rgba(44, 36, 27, .1); }
+.city-rail > div:first-child span { color: #a6533f; font: 700 8px/1 Georgia, serif; letter-spacing: 1.5px; }
+.city-rail > div:first-child p { margin: 0; color: #66736c; font-size: 10px; }
+.city-rail nav { display: grid; grid-template-columns: repeat(5, minmax(80px, 1fr)); }
+.city-rail nav button { display: grid; align-content: center; justify-items: center; gap: 5px; border: 0; border-right: 1px solid rgba(44, 36, 27, .08); background: transparent; color: #5e665f; cursor: pointer; font-family: 'Noto Serif SC', serif; transition: .25s ease; }
+.city-rail nav button:hover { background: rgba(49, 91, 90, .06); color: #315b5a; }
+.city-rail nav button.active { background: #315b5a; color: #fffaf1; }
+.city-rail nav small { font: 700 7px/1 Georgia, serif; letter-spacing: 1.5px; opacity: .62; }
+.city-rail nav b { font-size: 14px; letter-spacing: 2px; }
+.catalog-proof { display: flex; align-items: center; gap: 12px; padding: 12px 17px; background: #ded1b9; }
+.catalog-proof > span { color: #315b5a; font: 500 32px/1 Georgia, serif; }
+.catalog-proof p { margin: 0; color: #625e54; font-size: 8px; line-height: 1.65; }
+
+.inspiration-layout { display: grid; grid-template-columns: minmax(390px, .95fr) minmax(560px, 1.45fr); gap: 16px; }
+.featured-place { position: sticky; top: 18px; min-height: 610px; overflow: hidden; background: #20362f; box-shadow: 0 18px 45px rgba(37, 49, 44, .15); }
+.featured-place > img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.featured-shade { position: absolute; inset: 0; background: linear-gradient(180deg, rgba(21, 42, 37, .05), rgba(21, 42, 37, .32) 42%, rgba(20, 39, 35, .92)); }
+.featured-number { position: absolute; top: 23px; right: 25px; color: rgba(255, 250, 241, .7); font: 500 16px/1 Georgia, serif; }
+.featured-copy { position: absolute; right: 0; bottom: 0; left: 0; padding: 34px 36px 38px; color: #fffaf1; }
+.place-flags { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 19px; }
+.place-flags span { padding: 5px 8px; border: 1px solid rgba(255, 250, 241, .38); font-size: 8px; letter-spacing: 1px; backdrop-filter: blur(7px); }
+.featured-copy > p { margin: 0 0 9px; color: #dbb08b; font: 700 9px/1 Georgia, serif; letter-spacing: 2px; }
+.featured-copy h3 { margin: 0; font-family: 'Noto Serif SC', serif; font-size: clamp(31px, 3.4vw, 48px); font-weight: 500; letter-spacing: -2px; line-height: 1.2; }
+.featured-copy > strong { display: -webkit-box; margin-top: 15px; overflow: hidden; color: rgba(255, 250, 241, .78); font-size: 11px; font-weight: 400; line-height: 1.9; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
+.featured-actions { display: flex; gap: 8px; margin-top: 24px; }
+.featured-actions button { min-height: 40px; padding: 0 16px; border: 1px solid rgba(255, 250, 241, .6); background: rgba(255, 255, 255, .05); color: #fffaf1; cursor: pointer; font-family: inherit; font-size: 10px; }
+.featured-actions button:last-child { border-color: #d59468; background: #c66d4e; }
+.featured-actions b { margin-left: 14px; }
+
+.place-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.place-card { display: grid; grid-template-rows: 1fr 36px; min-height: 293px; overflow: hidden; border-top: 3px solid #315b5a; background: rgba(255, 252, 246, .9); box-shadow: 0 12px 30px rgba(62, 60, 50, .07); }
+.place-card-main { display: grid; grid-template-rows: 135px 1fr; min-width: 0; padding: 0; border: 0; background: transparent; color: inherit; cursor: pointer; text-align: left; }
+.place-card-visual { position: relative; overflow: hidden; }
+.place-card-visual::after { position: absolute; inset: 0; content: ''; background: linear-gradient(180deg, transparent, rgba(31, 51, 45, .24)); }
+.place-card-visual img { width: 100%; height: 100%; object-fit: cover; transition: transform .45s ease; }
+.place-card:hover .place-card-visual img { transform: scale(1.04); }
+.place-card-visual > span { position: absolute; z-index: 1; top: 13px; left: 14px; color: #fffaf1; font: 700 10px/1 Georgia, serif; text-shadow: 0 1px 8px rgba(0,0,0,.4); }
+.place-card-visual mark { position: absolute; z-index: 1; right: 10px; bottom: 10px; padding: 5px 7px; background: rgba(247, 241, 229, .9); color: #315b5a; font-size: 8px; }
+.place-card-copy { min-width: 0; padding: 15px 16px 13px; }
+.place-card-copy > small { color: #a6533f; font-size: 7px; letter-spacing: .8px; }
+.place-card-copy h4 { margin: 7px 0 6px; overflow: hidden; color: #253d36; font-family: 'Noto Serif SC', serif; font-size: 16px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.place-card-copy > p { display: -webkit-box; height: 33px; margin: 0; overflow: hidden; color: #727a73; font-size: 9px; line-height: 1.7; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.place-card-copy > div { display: flex; justify-content: space-between; gap: 8px; margin-top: 9px; color: #7e817a; font-size: 7px; }
+.place-card-copy > div b { color: #315b5a; }
+.place-plan-button { border: 0; border-top: 1px solid rgba(44, 36, 27, .08); background: #eee4d2; color: #315b5a; cursor: pointer; font-family: inherit; font-size: 9px; font-weight: 700; }
+.place-plan-button span { margin-left: 8px; color: #a6533f; }
+
+.inspiration-state { display: grid; min-height: 500px; place-content: center; justify-items: center; gap: 9px; background: rgba(250, 246, 237, .76); color: #315b5a; text-align: center; backdrop-filter: blur(12px); }
+.inspiration-state i { width: 31px; height: 31px; border: 2px solid rgba(49, 91, 90, .17); border-top-color: #315b5a; border-radius: 50%; animation: inspiration-spin .8s linear infinite; }
+.inspiration-state > span { display: grid; width: 32px; height: 32px; place-items: center; border: 1px solid #a6533f; border-radius: 50%; color: #a6533f; }
+.inspiration-state b { margin-top: 5px; font-family: 'Noto Serif SC', serif; font-size: 20px; }
+.inspiration-state p { margin: 0; color: #768078; font-size: 10px; }
+.inspiration-state button { margin-top: 10px; padding: 8px 15px; border: 1px solid #315b5a; background: transparent; color: #315b5a; cursor: pointer; }
+
+.place-backdrop { position: fixed; z-index: 1000; inset: 0; display: grid; justify-items: end; background: rgba(20, 31, 28, .48); backdrop-filter: blur(5px); }
+.place-detail { display: grid; grid-template-columns: minmax(280px, .72fr) minmax(430px, 1fr); width: min(930px, 94vw); height: 100%; overflow: auto; background: #f7f1e5; box-shadow: -25px 0 70px rgba(15, 28, 24, .22); }
+.detail-close { position: fixed; z-index: 2; top: 20px; right: 22px; display: grid; width: 35px; height: 35px; place-items: center; border: 1px solid rgba(255,255,255,.5); border-radius: 50%; background: rgba(32, 54, 47, .72); color: #fffaf1; cursor: pointer; font-size: 20px; backdrop-filter: blur(6px); }
+.detail-visual { position: sticky; top: 0; height: 100vh; overflow: hidden; }
+.detail-visual::after { position: absolute; inset: 0; content: ''; background: linear-gradient(180deg, transparent 50%, rgba(28, 49, 43, .65)); }
+.detail-visual img { width: 100%; height: 100%; object-fit: cover; }
+.detail-visual span { position: absolute; z-index: 1; bottom: 30px; left: 28px; color: #fffaf1; font: 700 10px/1 Georgia, serif; letter-spacing: 2px; }
+.detail-copy { align-self: center; padding: 70px 55px 55px; }
+.detail-eyebrow { margin: 0; color: #a6533f; font: 700 8px/1 Georgia, serif; letter-spacing: 2px; }
+.detail-copy h2 { margin: 13px 0 15px; color: #20362f; font-family: 'Noto Serif SC', serif; font-size: clamp(30px, 4vw, 46px); font-weight: 500; letter-spacing: -2px; line-height: 1.25; }
+.detail-summary { color: #66736c; font-size: 11px; line-height: 1.9; }
+.detail-tags { display: flex; flex-wrap: wrap; gap: 6px; margin: 20px 0 25px; }
+.detail-tags span { padding: 5px 8px; border: 1px solid rgba(49, 91, 90, .18); color: #315b5a; font-size: 8px; }
+.detail-copy dl { margin: 0; border-top: 3px solid #315b5a; }
+.detail-copy dl > div { display: grid; grid-template-columns: 82px 1fr; gap: 14px; padding: 12px 0; border-bottom: 1px solid rgba(44, 36, 27, .1); }
+.detail-copy dt { color: #8a8e87; font-size: 8px; }
+.detail-copy dd { margin: 0; color: #344a43; font-size: 10px; line-height: 1.55; }
+.detail-source { display: grid; gap: 5px; margin-top: 20px; padding: 14px; background: #e9deca; }
+.detail-source span { color: #9b6551; font-size: 7px; letter-spacing: 1px; }
+.detail-source b { color: #5e655f; font-size: 9px; font-weight: 500; }
+.detail-actions { display: grid; grid-template-columns: 1fr 1.2fr; gap: 8px; margin-top: 22px; }
+.detail-actions a, .detail-actions button { display: flex; min-height: 42px; align-items: center; justify-content: center; border: 1px solid #315b5a; background: transparent; color: #315b5a; cursor: pointer; font-family: inherit; font-size: 9px; text-decoration: none; }
+.detail-actions button { background: #315b5a; color: #fffaf1; }
+.detail-actions span { margin-left: 10px; }
+
+.place-drawer-enter-active, .place-drawer-leave-active { transition: opacity .35s ease; }
+.place-drawer-enter-active .place-detail, .place-drawer-leave-active .place-detail { transition: transform .42s cubic-bezier(.2,.8,.2,1); }
+.place-drawer-enter-from, .place-drawer-leave-to { opacity: 0; }
+.place-drawer-enter-from .place-detail, .place-drawer-leave-to .place-detail { transform: translateX(100%); }
+@keyframes inspiration-spin { to { transform: rotate(360deg); } }
+
+@media (max-width: 1050px) {
+  .city-rail { grid-template-columns: 1fr 150px; }
+  .city-rail > div:first-child { display: none; }
+  .inspiration-layout { grid-template-columns: 1fr; }
+  .featured-place { position: relative; top: 0; min-height: 520px; }
+}
+
+@media (max-width: 720px) {
+  .city-rail { grid-template-columns: 1fr; }
+  .city-rail nav { overflow-x: auto; grid-template-columns: repeat(5, 88px); }
+  .city-rail nav button { min-height: 64px; }
+  .catalog-proof { display: none; }
+  .place-grid { grid-template-columns: 1fr; }
+  .featured-place { min-height: 480px; }
+  .featured-copy { padding: 26px 22px 28px; }
+  .featured-copy h3 { font-size: 31px; letter-spacing: -1px; }
+  .featured-actions { display: grid; }
+  .place-detail { grid-template-columns: 1fr; width: 100%; }
+  .detail-visual { position: relative; height: 270px; }
+  .detail-copy { padding: 37px 23px 45px; }
+  .detail-actions { grid-template-columns: 1fr; }
+}
+</style>

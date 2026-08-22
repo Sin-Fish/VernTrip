@@ -1,0 +1,8 @@
+build
+build-codex
+data
+storage
+*.log
+.gradle
+.idea
+.vscode

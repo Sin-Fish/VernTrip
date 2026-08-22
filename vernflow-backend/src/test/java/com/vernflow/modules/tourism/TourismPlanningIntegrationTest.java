@@ -2,15 +2,26 @@ package com.vernflow.modules.tourism;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.vernflow.integration.amap.AmapPoiClient;
+import com.vernflow.integration.amap.AmapPoiClient.AmapPoi;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
+import java.math.BigDecimal;
+import java.util.List;
+
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -32,7 +43,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         "app.storage.workspace-root-dir=./build/test-storage/tourism-planning",
         "app.ai.base-url=http://127.0.0.1:65530",
         "app.user.auth-required=false",
-        "app.openclaw.engine=legacy"
+        "app.openclaw.engine=legacy",
+        "app.amap.web-service.key=test-amap-key",
+        "app.amap.web-service.dynamic-catalog-enabled=true",
+        "app.amap.web-service.minimum-catalog-size=8"
 })
 @AutoConfigureMockMvc
 class TourismPlanningIntegrationTest {
@@ -42,6 +56,9 @@ class TourismPlanningIntegrationTest {
 
     @Autowired
     private ObjectMapper objectMapper;
+
+    @MockBean
+    private AmapPoiClient amapPoiClient;
 
     @Test
     void shouldExtractConversationIntoAReadyTravelDraft() throws Exception {
@@ -75,6 +92,124 @@ class TourismPlanningIntegrationTest {
                 .andExpect(jsonPath("$.data.missingFields").isEmpty())
                 .andExpect(jsonPath("$.data.readyToGenerate").value(true))
                 .andExpect(jsonPath("$.data.engine").value("local"));
+    }
+
+    @Test
+    void shouldGenerateFourDayPlanWithCustomBudget() throws Exception {
+        mockMvc.perform(post("/api/tourism/trips/plan")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "destination":"杭州",
+                                  "departure":"苏州",
+                                  "date":"2026-08-22",
+                                  "days":4,
+                                  "travelers":"两位朋友和一位长辈",
+                                  "budget":4800,
+                                  "pace":"上午充实，下午尽量轻松",
+                                  "interests":["摄影","本地美食"],
+                                  "notes":"每天留出午休时间。"
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.engine").value("local"))
+                .andExpect(jsonPath("$.data.request.days").value(4))
+                .andExpect(jsonPath("$.data.request.budget").value(4800))
+                .andExpect(jsonPath("$.data.request.travelers").value("两位朋友和一位长辈"))
+                .andExpect(jsonPath("$.data.days.length()").value(4))
+                .andExpect(jsonPath("$.data.days[2].items.length()").value(3))
+                .andExpect(jsonPath("$.data.days[3].title").value("龙井茶事与运河日常"))
+                .andExpect(jsonPath("$.data.budget.reserve").isNumber());
+    }
+
+    @Test
+    void shouldImportAndPlanWithAnotherCityCatalog() throws Exception {
+        when(amapPoiClient.available()).thenReturn(true);
+        when(amapPoiClient.search(eq("苏州"), anyString())).thenAnswer(invocation -> switch (
+                invocation.getArgument(1, String.class)
+        ) {
+            case "景点" -> List.of(
+                    poi("SZ001", "拙政园", "姑苏区", "东北街178号", "120.629120", "31.326510", "80"),
+                    poi("SZ002", "金鸡湖景区", "苏州工业园区", "现代大道", "120.704930", "31.316420", "0")
+            );
+            case "博物馆" -> List.of(
+                    poi("SZ003", "苏州博物馆", "姑苏区", "东北街204号", "120.627910", "31.324320", "0")
+            );
+            case "文化体验" -> List.of(
+                    poi("SZ004", "苏州丝绸博物馆", "姑苏区", "人民路2001号", "120.615280", "31.330930", "0")
+            );
+            case "餐厅" -> List.of(
+                    poi("SZ005", "苏州本帮菜馆", "姑苏区", "临顿路", "120.630010", "31.311920", "100"),
+                    poi("SZ006", "平江路苏式面馆", "姑苏区", "平江路", "120.638120", "31.314530", "45")
+            );
+            case "酒店" -> List.of(
+                    poi("SZ007", "姑苏文化酒店", "姑苏区", "十全街", "120.627620", "31.298740", "420"),
+                    poi("SZ008", "金鸡湖景观酒店", "苏州工业园区", "星港街", "120.684010", "31.311250", "560")
+            );
+            default -> List.of();
+        });
+
+        String responseBody = mockMvc.perform(post("/api/tourism/trips/plan")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "destination":"苏州",
+                                  "departure":"南京",
+                                  "date":"2026-09-05",
+                                  "days":3,
+                                  "travelers":"朋友结伴",
+                                  "budget":4200,
+                                  "pace":"轻松一些",
+                                  "interests":["园林","人文历史","本地美食"],
+                                  "notes":"下午保留休息时间。"
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.engine").value("local"))
+                .andExpect(jsonPath("$.data.request.destination").value("苏州"))
+                .andExpect(jsonPath("$.data.days.length()").value(3))
+                .andExpect(jsonPath("$.data.days[0].items.length()").value(4))
+                .andExpect(jsonPath("$.data.days[0].items[0].placeName").value("拙政园"))
+                .andExpect(jsonPath("$.data.days[0].items[0].longitude").value(120.629120))
+                .andExpect(jsonPath("$.data.days[0].title").value("苏州探索第 1 日"))
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+
+        JsonNode plan = objectMapper.readTree(responseBody).path("data");
+        assertThat(plan.toString()).doesNotContain("杭州");
+        assertThat(plan.path("sources")).hasSizeGreaterThanOrEqualTo(6);
+
+        mockMvc.perform(get("/api/tourism/resources").param("city", "苏州市"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.length()").value(8));
+        verify(amapPoiClient, times(5)).search(eq("苏州"), anyString());
+    }
+
+    private AmapPoi poi(
+            String id,
+            String name,
+            String district,
+            String address,
+            String longitude,
+            String latitude,
+            String cost
+    ) {
+        return new AmapPoi(
+                id,
+                name,
+                "旅游资源",
+                "110000",
+                "苏州市",
+                district,
+                address,
+                new BigDecimal(longitude),
+                new BigDecimal(latitude),
+                "周一至周日 09:00-18:00",
+                new BigDecimal(cost),
+                new BigDecimal("4.6"),
+                "苏州特色"
+        );
     }
 
     @Test

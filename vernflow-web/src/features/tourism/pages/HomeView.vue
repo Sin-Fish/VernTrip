@@ -34,14 +34,8 @@
         </header>
 
         <div class="explore-body">
-          <main class="explore-main">
-            <HeroCarousel :slides="banners" />
-          </main>
-          <aside class="explore-sidebar">
-            <MountainCard />
-          </aside>
+          <TravelInspiration />
         </div>
-        <AITravelogue />
       </section>
     </Transition>
   </div>
@@ -50,25 +44,15 @@
 <script setup>
 import { onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import AITravelogue from '../components/AITravelogue.vue'
 import FeatureStrip from '../components/FeatureStrip.vue'
-import HeroCarousel from '../components/HeroCarousel.vue'
 import HeroSection from '../components/HeroSection.vue'
-import MountainCard from '../components/MountainCard.vue'
+import TravelInspiration from '../components/TravelInspiration.vue'
 
 const route = useRoute()
 const router = useRouter()
 const explorePanel = ref(null)
 const scene = ref(route.query.scene === 'explore' ? 'explore' : 'hero')
 let wheelLocked = false
-
-const banners = [
-  '/images/banner1.jpg',
-  '/images/banner2.jpg',
-  '/images/banner3.jpg',
-  '/images/banner4.jpg',
-  '/images/banner5.jpg',
-]
 
 function setScene(nextScene) {
   if (scene.value === nextScene) return
@@ -294,18 +278,9 @@ onMounted(() => {
 }
 
 .explore-body {
-  display: grid;
-  grid-template-columns: minmax(0, 1.55fr) minmax(320px, 1fr);
-  align-items: stretch;
-  gap: 20px;
   width: min(1420px, calc(100% - 64px));
   margin: 0 auto;
-  padding-bottom: 28px;
-}
-
-.explore-main,
-.explore-sidebar {
-  min-width: 0;
+  padding-bottom: 70px;
 }
 
 .scene-dissolve-enter-active,
@@ -345,7 +320,7 @@ onMounted(() => {
   .inspiration-heading > div { grid-column: 1 / -1; grid-row: 1; }
   .return-button { grid-column: 1; grid-row: 2; }
   .planner-link { grid-column: 2; grid-row: 2; }
-  .explore-body { grid-template-columns: 1fr; width: calc(100% - 32px); }
+  .explore-body { width: calc(100% - 32px); }
 }
 
 @media (max-width: 640px) {

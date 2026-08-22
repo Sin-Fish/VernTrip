@@ -1,0 +1,7 @@
+host
+state
+plugin/node_modules
+plugin/dist
+plugin/dist-stale-*
+plugin/*.tgz
+*.log

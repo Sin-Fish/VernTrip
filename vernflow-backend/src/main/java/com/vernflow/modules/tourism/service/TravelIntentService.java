@@ -26,16 +26,19 @@ import java.util.regex.Pattern;
 @Service
 public class TravelIntentService {
 
-    private static final String SUPPORTED_CITY = "杭州";
     private static final List<String> CITIES = List.of(
-            "杭州", "上海", "苏州", "南京", "宁波", "绍兴", "嘉兴", "湖州", "无锡", "北京", "成都", "广州"
+            "杭州", "上海", "苏州", "南京", "宁波", "绍兴", "嘉兴", "湖州", "无锡", "常州", "扬州",
+            "镇江", "北京", "天津", "西安", "洛阳", "开封", "成都", "重庆", "长沙", "武汉", "广州",
+            "深圳", "珠海", "厦门", "泉州", "福州", "青岛", "济南", "泰安", "合肥", "黄山", "昆明",
+            "大理", "丽江", "桂林", "张家界", "三亚", "海口", "哈尔滨", "长春", "沈阳", "大连",
+            "拉萨", "乌鲁木齐"
     );
     private static final List<String> INTEREST_ORDER = List.of(
             "非遗体验", "本地美食", "自然风景", "人文历史", "亲子友好", "城市漫步", "夜游体验"
     );
     private static final Pattern DATE_PATTERN = Pattern.compile("(?:(\\d{4})年)?(\\d{1,2})月(\\d{1,2})[日号]");
     private static final Pattern ISO_DATE_PATTERN = Pattern.compile("(20\\d{2})[-/.](\\d{1,2})[-/.](\\d{1,2})");
-    private static final Pattern DAYS_PATTERN = Pattern.compile("([一二两12])\\s*(?:天|日)");
+    private static final Pattern DAYS_PATTERN = Pattern.compile("([一二两三四五六七1-7])\\s*(?:天|日)");
     private static final Pattern BUDGET_PREFIX_PATTERN = Pattern.compile("(?:预算|费用|花费|人均)\\D{0,6}(\\d{3,5})");
     private static final Pattern BUDGET_SUFFIX_PATTERN = Pattern.compile("[¥￥]?(\\d{3,5})\\s*(?:元|块)");
 
@@ -44,7 +47,7 @@ public class TravelIntentService {
         DraftState state = new DraftState(request.current());
         List<String> warnings = new ArrayList<>();
 
-        extractCities(prompt, state, warnings);
+        extractCities(prompt, state);
         extractDate(prompt, state);
         extractDays(prompt, state, warnings);
         extractBudget(prompt, state);
@@ -54,11 +57,7 @@ public class TravelIntentService {
         extractNotes(prompt, state);
 
         List<String> missingFields = state.missingFields();
-        boolean supported = !StringUtils.hasText(state.destination) || SUPPORTED_CITY.equals(state.destination);
-        if (!supported) {
-            warnings.add("当前首版路线库仅支持杭州，其他目的地将在资源库扩充后开放。");
-        }
-        boolean ready = missingFields.isEmpty() && supported;
+        boolean ready = missingFields.isEmpty();
         return new Analysis(
                 state.toDraft(),
                 List.copyOf(state.changes.values()),
@@ -87,7 +86,7 @@ public class TravelIntentService {
         return String.join("", parts);
     }
 
-    private void extractCities(String prompt, DraftState state, List<String> warnings) {
+    private void extractCities(String prompt, DraftState state) {
         String departure = null;
         for (String city : CITIES) {
             if (prompt.contains("从" + city) || prompt.contains(city + "出发")) {
@@ -106,9 +105,6 @@ public class TravelIntentService {
         for (String city : CITIES) {
             if (destinationSource.contains(city)) {
                 state.setDestination(city);
-                if (!SUPPORTED_CITY.equals(city)) {
-                    warnings.add("已识别目的地为" + city + "，但当前首版路线库仅支持杭州。");
-                }
                 return;
             }
         }
@@ -166,13 +162,18 @@ public class TravelIntentService {
         int days = switch (matcher.group(1)) {
             case "一", "1" -> 1;
             case "二", "两", "2" -> 2;
+            case "三", "3" -> 3;
+            case "四", "4" -> 4;
+            case "五", "5" -> 5;
+            case "六", "6" -> 6;
+            case "七", "7" -> 7;
             default -> 0;
         };
         if (days > 0) state.setDays(days);
 
         Matcher unsupported = Pattern.compile("(\\d+)\\s*(?:天|日)").matcher(prompt);
-        if (unsupported.find() && Integer.parseInt(unsupported.group(1)) > 2) {
-            warnings.add("当前首版支持一至两日行程，多日路线将在后续版本开放。");
+        if (unsupported.find() && Integer.parseInt(unsupported.group(1)) > 7) {
+            warnings.add("当前行程资源支持一至七日规划，请将天数调整到 7 天以内。");
         }
     }
 
@@ -372,7 +373,8 @@ public class TravelIntentService {
             if (!StringUtils.hasText(date)) missing.add("出发日期");
             if (days == null) missing.add("出行天数");
             if (!StringUtils.hasText(travelers)) missing.add("同行伙伴");
-            if (budget == null || budget.compareTo(BigDecimal.valueOf(1200)) < 0) missing.add("预算");
+            long minimumBudget = Math.max(1, days == null ? 1 : days) * 600L;
+            if (budget == null || budget.compareTo(BigDecimal.valueOf(minimumBudget)) < 0) missing.add("预算");
             if (!StringUtils.hasText(pace)) missing.add("旅行节奏");
             if (interests.isEmpty()) missing.add("旅行偏好");
             return missing;

@@ -260,51 +260,43 @@ RAG_EMBEDDING_BACKEND=hash
 
 ## 5. Docker 方式
 
-如果你想一次启动数据库、后端和 AI 服务，可以使用：
+Docker Compose 现在可以统一启动：
+
+- Vue 游客端与商家端页面（Nginx）
+- Spring Boot 后端
+- Python AI 服务
+- PostgreSQL + pgvector
+- OpenClaw Gateway、VernTrip 插件和 Skill
+
+首次部署先生成独立环境文件：
 
 ```powershell
-docker compose -f deploy/docker-compose.yml up --build
+.\scripts\docker\init-env.ps1
 ```
 
-这条命令会启动：
+然后填写 `deploy/.env` 中的 `DEEPSEEK_API_KEY` 和三项高德配置，再启动：
 
-- PostgreSQL
-- AI 子服务
-- 后端
+```powershell
+docker compose --env-file deploy/.env -f deploy/docker-compose.yml up -d --build
+docker compose --env-file deploy/.env -f deploy/docker-compose.yml ps
+```
 
-### 5.1 这条命令不会启动什么
+Windows 也可以直接使用：
 
-当前 `deploy/docker-compose.yml` **不会**启动：
+```powershell
+.\scripts\docker\start.ps1
+.\scripts\docker\status.ps1
+```
 
-- `vernflow-web`
-- `vernflow-admin`
+默认访问地址为 `http://localhost`。Web 容器将 `/api` 反向代理到后端；OpenClaw Gateway、后端和数据库只绑定本机端口。
 
-也就是说，Docker Compose 目前只负责：
+停止服务不会删除数据：
 
-- 数据库
-- 后端
-- AI 子服务
+```powershell
+docker compose --env-file deploy/.env -f deploy/docker-compose.yml down
+```
 
-前端和管理后台仍然需要你：
-
-1. 本地用 `npm run dev` 启动
-2. 或者先构建再用静态服务器部署
-
-### 5.2 Docker 配置从哪里来
-
-这里要特别注意：
-
-**本地直接启动时**，项目会读根目录 `.env` / `.env.local`。
-**Docker Compose 启动时**，以 `deploy/docker-compose.yml` 里的配置为准。
-
-因此，如果你发现：
-
-- 本地直启没问题
-- Docker 起来后配置不一样
-
-优先检查：
-
-- `deploy/docker-compose.yml`
+完整操作、备份恢复和故障检查见 `docs/施工文档/Docker部署指南.md`。
 
 ## 6. 前端正式部署
 

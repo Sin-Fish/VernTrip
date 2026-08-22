@@ -25,6 +25,17 @@ server:
   port: ${SERVER_PORT:8080}
   address: 0.0.0.0
 
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: never
+
 logging:
   level:
     root: ${LOG_LEVEL:INFO}
@@ -62,6 +73,14 @@ app:
     shadow-timeout: ${OPENCLAW_SHADOW_TIMEOUT:60s}
     shadow-max-output-tokens: ${OPENCLAW_SHADOW_MAX_OUTPUT_TOKENS:2400}
     shadow-max-stored-chars: ${OPENCLAW_SHADOW_MAX_STORED_CHARS:12000}
+  amap:
+    web-service:
+      base-url: ${AMAP_WEB_SERVICE_BASE_URL:https://restapi.amap.com}
+      key: ${AMAP_WEB_SERVICE_KEY:}
+      timeout: ${AMAP_WEB_SERVICE_TIMEOUT:8s}
+      dynamic-catalog-enabled: ${AMAP_DYNAMIC_CATALOG_ENABLED:true}
+      minimum-catalog-size: ${AMAP_MINIMUM_CATALOG_SIZE:12}
+      page-size: ${AMAP_POI_PAGE_SIZE:8}
   rag:
     default-profile: ${RAG_PROFILE:tfidf_topk_basic}
   rag-store:

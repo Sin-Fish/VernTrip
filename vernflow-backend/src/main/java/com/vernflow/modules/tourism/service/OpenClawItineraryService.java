@@ -31,9 +31,9 @@ public class OpenClawItineraryService {
     private static final String INSTRUCTIONS = """
             你是 VernTrip 的结构化行程编排 Agent。
             必须先调用 verntrip_tourism_catalog_read 读取目的地资源，只能使用工具返回的资源名称。
-            根据游客的日期、天数、同行人群、预算、节奏和兴趣，安排一份可执行的一至两日行程。
-            每天安排 3 至 4 个游览、餐饮或体验节点；两日行程的第 1 天可额外安排 1 个住宿节点，因此最多 5 个节点。
-            两日行程必须包含且仅包含一项住宿；避免同一资源重复出现。
+            根据游客的日期、天数、同行人群、预算、节奏和兴趣，安排一份可执行的一至七日行程，输出天数必须与游客要求完全一致。
+            每天安排 3 至 4 个游览、餐饮或体验节点；多日行程的第 1 天可额外安排 1 个住宿节点，因此最多 5 个节点。
+            多日行程必须包含且仅包含一项住宿，放在第 1 天并按整段连续入住计算费用；同一天不得重复使用资源，长行程可跨天复访。
             cost 表示本次同行人群在该节点的预计总费用，所有节点费用之和不得超过总预算的 85%。
             最终只输出一个 JSON 对象，不要输出 Markdown、代码围栏、解释或额外文字。
             JSON 格式必须严格为：
@@ -224,8 +224,8 @@ public class OpenClawItineraryService {
                 Hard constraints:
                 - each day must contain 3 or 4 activity items;
                 - day 1 may contain a fifth item only when that item is the trip's single lodging resource;
-                - a two-day trip must contain exactly one lodging item and it must be on day 1;
-                - resourceName must exactly match the catalog and cannot be repeated;
+                - a multi-day trip must contain exactly one lodging item on day 1, representing the whole stay;
+                - resourceName must exactly match the catalog and cannot be repeated within the same day;
                 - total cost must stay within 85%% of the user's budget.
                 Previous candidate:
                 %s
@@ -280,7 +280,6 @@ public class OpenClawItineraryService {
             Map<String, TourismResource> resourcesByName = new HashMap<>();
             availableResources.forEach(resource -> resourcesByName.put(resource.getName(), resource));
             List<AgentStop> stops = new ArrayList<>();
-            Set<String> usedResources = new HashSet<>();
             int lodgingDay = 0;
             BigDecimal totalCost = BigDecimal.ZERO;
 
@@ -289,6 +288,7 @@ public class OpenClawItineraryService {
                 int dayNumber = day.path("day").asInt(-1);
                 JsonNode items = day.path("items");
                 int maxItems = request.getDays() > 1 && dayNumber == 1 ? 5 : 4;
+                Set<String> dayResources = new HashSet<>();
                 if (dayNumber != dayIndex + 1 || !items.isArray() || items.size() < 3 || items.size() > maxItems) {
                     throw new InvalidAgentPlanException("day_items_invalid");
                 }
@@ -301,7 +301,7 @@ public class OpenClawItineraryService {
                     }
                     String resourceName = requiredText(item, "resourceName", 160);
                     TourismResource resource = resourcesByName.get(resourceName);
-                    if (resource == null || !usedResources.add(resourceName)) {
+                    if (resource == null || !dayResources.add(resourceName)) {
                         throw new InvalidAgentPlanException("resource_invalid_or_repeated");
                     }
 
@@ -330,6 +330,16 @@ public class OpenClawItineraryService {
             }
 
             BigDecimal costLimit = request.getBudget().multiply(BigDecimal.valueOf(0.85));
+            if (request.getDays() > 1 && lodgingDay > 1) {
+                stops = moveSingleLodgingToDayOne(stops, resourcesByName, request.getDays());
+                lodgingDay = 1;
+            }
+            if (totalCost.compareTo(costLimit) > 0) {
+                stops = rebalanceCosts(stops, request.getBudget().multiply(BigDecimal.valueOf(0.80)));
+                totalCost = stops.stream()
+                        .map(AgentStop::cost)
+                        .reduce(BigDecimal.ZERO, BigDecimal::add);
+            }
             if (totalCost.compareTo(costLimit) > 0
                     || (request.getDays() > 1 && lodgingDay != 1)) {
                 throw new InvalidAgentPlanException("budget_or_lodging_invalid");
@@ -340,6 +350,84 @@ public class OpenClawItineraryService {
         } catch (Exception exception) {
             throw new InvalidAgentPlanException("response_json_invalid", exception);
         }
+    }
+
+    private List<AgentStop> moveSingleLodgingToDayOne(
+            List<AgentStop> stops,
+            Map<String, TourismResource> resourcesByName,
+            int dayCount
+    ) {
+        AgentStop lodging = stops.stream()
+                .filter(stop -> resourcesByName.get(stop.resourceName()).getCategory()
+                        == TourismResource.Category.LODGING)
+                .findFirst()
+                .orElseThrow(() -> new InvalidAgentPlanException("lodging_count_invalid"));
+        long dayOneItems = stops.stream()
+                .filter(stop -> stop.day() == 1)
+                .count();
+        if (dayOneItems >= 5) {
+            throw new InvalidAgentPlanException("budget_or_lodging_invalid");
+        }
+
+        List<AgentStop> normalized = new ArrayList<>();
+        for (int day = 1; day <= dayCount; day++) {
+            int targetDay = day;
+            List<AgentStop> dayStops = stops.stream()
+                    .filter(stop -> stop.day() == targetDay)
+                    .filter(stop -> !stop.resourceName().equals(lodging.resourceName()))
+                    .toList();
+            for (AgentStop stop : dayStops) {
+                normalized.add(new AgentStop(
+                        day,
+                        normalizedSequence(normalized, day),
+                        stop.time(),
+                        stop.label(),
+                        stop.resourceName(),
+                        stop.description(),
+                        stop.tag(),
+                        stop.cost()
+                ));
+            }
+            if (day == 1) {
+                normalized.add(new AgentStop(
+                        1,
+                        normalizedSequence(normalized, 1),
+                        "18:00",
+                        lodging.label(),
+                        lodging.resourceName(),
+                        lodging.description(),
+                        lodging.tag(),
+                        lodging.cost()
+                ));
+            }
+        }
+        return normalized;
+    }
+
+    private List<AgentStop> rebalanceCosts(List<AgentStop> stops, BigDecimal targetTotal) {
+        BigDecimal currentTotal = stops.stream()
+                .map(AgentStop::cost)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        if (currentTotal.signum() == 0 || currentTotal.compareTo(targetTotal) <= 0) {
+            return stops;
+        }
+        BigDecimal factor = targetTotal.divide(currentTotal, 8, java.math.RoundingMode.DOWN);
+        return stops.stream()
+                .map(stop -> new AgentStop(
+                        stop.day(),
+                        stop.sequence(),
+                        stop.time(),
+                        stop.label(),
+                        stop.resourceName(),
+                        stop.description(),
+                        stop.tag(),
+                        stop.cost().multiply(factor).setScale(0, java.math.RoundingMode.DOWN)
+                ))
+                .toList();
+    }
+
+    private int normalizedSequence(List<AgentStop> stops, int day) {
+        return (int) stops.stream().filter(stop -> stop.day() == day).count() + 1;
     }
 
     private String extractJson(String responseText) {

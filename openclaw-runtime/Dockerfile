@@ -15,10 +15,17 @@ RUN npm ci --ignore-scripts \
 FROM ${OPENCLAW_IMAGE}
 
 USER root
-RUN install -d -m 0755 -o node -g node /opt/verntrip/packages /opt/verntrip/skills /opt/verntrip/config
+RUN install -d -m 0755 -o node -g node \
+      /opt/verntrip/packages \
+      /opt/verntrip/skills \
+      /opt/verntrip/config \
+      /opt/verntrip/bin \
+      /home/node/.openclaw
 
 COPY --from=plugin-build --chown=node:node /build/package/verntrip-plugin.tgz /opt/verntrip/packages/verntrip-plugin.tgz
 COPY --chown=node:node skills /opt/verntrip/skills
 COPY --chown=node:node config /opt/verntrip/config
+COPY --chown=node:node docker-init.sh /opt/verntrip/bin/docker-init.sh
+RUN chmod 0755 /opt/verntrip/bin/docker-init.sh
 
 USER node

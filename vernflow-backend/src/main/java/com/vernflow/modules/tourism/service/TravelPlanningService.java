@@ -57,6 +57,7 @@ public class TravelPlanningService {
     private final ObjectMapper objectMapper;
     private final OpenClawItineraryService openClawItineraryService;
     private final OpenClawProperties openClawProperties;
+    private final DynamicTourismCatalogService dynamicTourismCatalogService;
 
     public TravelPlanningService(
             UserAuthService userAuthService,
@@ -67,7 +68,8 @@ public class TravelPlanningService {
             TripFeedbackRepository tripFeedbackRepository,
             ObjectMapper objectMapper,
             OpenClawItineraryService openClawItineraryService,
-            OpenClawProperties openClawProperties
+            OpenClawProperties openClawProperties,
+            DynamicTourismCatalogService dynamicTourismCatalogService
     ) {
         this.userAuthService = userAuthService;
         this.tourismResourceRepository = tourismResourceRepository;
@@ -78,12 +80,13 @@ public class TravelPlanningService {
         this.objectMapper = objectMapper;
         this.openClawItineraryService = openClawItineraryService;
         this.openClawProperties = openClawProperties;
+        this.dynamicTourismCatalogService = dynamicTourismCatalogService;
     }
 
-    @Transactional(readOnly = true)
+    @Transactional
     public List<TourismResourceResponse> listResources(String city) {
         String targetCity = StringUtils.hasText(city) ? city.trim() : SUPPORTED_CITY;
-        return publishedResources(targetCity).stream()
+        return dynamicTourismCatalogService.resourcesFor(targetCity).stream()
                 .map(this::toResourceResponse)
                 .toList();
     }
@@ -91,6 +94,10 @@ public class TravelPlanningService {
     @Transactional
     public TravelPlanResponse createPlan(Long userId, TravelPlanCreateRequest request) {
         userAuthService.requireUser(userId);
+        BigDecimal minimumBudget = minimumBudgetForDays(request.days());
+        if (request.budget().compareTo(minimumBudget) < 0) {
+            throw new BusinessException("当前天数的总预算建议不低于￥" + minimumBudget.toPlainString() + "。");
+        }
         TripRequest tripRequest = tripRequestRepository.save(TripRequest.create(
                 userId,
                 request.destination().trim(),
@@ -128,7 +135,7 @@ public class TravelPlanningService {
 
         switch (type) {
             case "budget" -> budget = budget.subtract(BigDecimal.valueOf(500))
-                    .max(BigDecimal.valueOf(1200));
+                    .max(minimumBudgetForDays(previousRequest.getDays()));
             case "pace" -> pace = "轻松一些";
             case "hotel" -> notes = appendNote(notes, "希望住宿更实惠。");
             case "custom" -> {
@@ -195,7 +202,9 @@ public class TravelPlanningService {
             throw new BusinessException("不支持的节点调整方式：" + adjustment.action());
         }
 
-        List<TourismResource> publishedResources = publishedResources(request.getDestination());
+        List<TourismResource> publishedResources = dynamicTourismCatalogService.resourcesFor(
+                request.getDestination()
+        );
         Map<Long, TourismResource> resourcesById = tourismResourceRepository.findAllById(
                         previousItems.stream().map(TravelPlanItem::getResourceId).filter(Objects::nonNull).toList()
                 ).stream()
@@ -427,9 +436,9 @@ public class TravelPlanningService {
     }
 
     private TravelPlanResponse generatePlan(TripRequest request, Long parentPlanId, int version) {
-        List<TourismResource> resources = publishedResources(request.getDestination());
+        List<TourismResource> resources = dynamicTourismCatalogService.resourcesFor(request.getDestination());
         if (resources.isEmpty()) {
-            throw new BusinessException("当前首版仅支持杭州的一至两日行程规划。");
+            throw new BusinessException("当前路线资源库暂不支持该目的地。");
         }
 
         Map<String, TourismResource> resourcesByName = resources.stream()
@@ -438,7 +447,7 @@ public class TravelPlanningService {
                 .generate(request.getUserId(), request, resources)
                 .orElse(null);
         List<PlannedStop> stops = agentItinerary == null
-                ? plannedStops(request)
+                ? plannedStops(request, resources)
                 : agentItinerary.stops().stream()
                         .map(stop -> new PlannedStop(
                                 stop.day(),
@@ -489,7 +498,17 @@ public class TravelPlanningService {
         return toResponse(plan);
     }
 
-    private List<PlannedStop> plannedStops(TripRequest request) {
+    private List<PlannedStop> plannedStops(
+            TripRequest request,
+            List<TourismResource> resources
+    ) {
+        if ("杭州".equals(dynamicTourismCatalogService.normalizeCity(request.getDestination()))) {
+            return hangzhouPlannedStops(request);
+        }
+        return catalogPlannedStops(request, resources);
+    }
+
+    private List<PlannedStop> hangzhouPlannedStops(TripRequest request) {
         boolean family = request.getTravelerType().contains("亲子");
         boolean relaxed = request.getPace().contains("轻松");
         boolean lowerBudget = request.getBudget().compareTo(BigDecimal.valueOf(2000)) <= 0;
@@ -537,8 +556,8 @@ public class TravelPlanningService {
         firstDay.add(new PlannedStop(1, 4, "18:30", "今晚住下",
                 affordableHotel ? "运河文化主题酒店" : "湖滨亲子友好酒店",
                 affordableHotel
-                        ? "选择交通便利、价格适中的住宿，把更多预算留给体验项目。"
-                        : "放下行李后不安排远距离移动，为第二天保留体力。",
+                        ? "连续入住" + (request.getDays() - 1) + "晚，选择交通便利、价格适中的住宿，把更多预算留给体验项目。"
+                        : "连续入住" + (request.getDays() - 1) + "晚，放下行李后不安排远距离移动，为后续行程保留体力。",
                 "住宿", hotel));
 
         List<PlannedStop> allStops = new ArrayList<>(firstDay);
@@ -558,7 +577,165 @@ public class TravelPlanningService {
                         ? "选择一件有明确工艺说明的小物作为旅行纪念。"
                         : "留出自由探索时间，按兴趣进入不同店铺。",
                 "人文历史", nightVisit));
+        if (request.getDays() == 2) {
+            return allStops;
+        }
+
+        for (int day = 3; day <= request.getDays(); day++) {
+            int route = (day - 3) % 3;
+            if (route == 0) {
+                allStops.add(new PlannedStop(day, 1, "09:30", "丝路晨光",
+                        "中国丝绸博物馆", "从丝绸与服饰工艺认识杭州，室内参观也适合作为天气变化时的稳妥安排。",
+                        "文化体验", BigDecimal.ZERO));
+                allStops.add(new PlannedStop(day, 2, "12:15", "午间杭州味",
+                        "湖滨时令小馆", "在湖滨范围内用餐，减少跨区折返，为下午留出完整时间。",
+                        "本地美食", secondMeal));
+                allStops.add(new PlannedStop(day, 3, "14:30", "山溪轻行",
+                        "九溪烟树轻徒步", "根据天气和同行人体力选择轻量路段，途中保留休息与自由拍摄时间。",
+                        "自然风景", BigDecimal.ZERO));
+            } else if (route == 1) {
+                allStops.add(new PlannedStop(day, 1, "09:30", "茶山上午",
+                        "龙井茶园采制体验", "用半天了解龙井茶的采制过程，预约时可说明同行人的年龄与体力情况。",
+                        "非遗体验", activity));
+                allStops.add(new PlannedStop(day, 2, "12:30", "运河午餐",
+                        "运河家常杭帮菜", "回到运河片区享用家常杭帮菜，口味和份量可按同行人灵活调整。",
+                        "本地美食", firstMeal));
+                allStops.add(new PlannedStop(day, 3, "15:00", "街巷留白",
+                        "小河直街午后散步", "不设必须完成的打卡点，以街巷、社区店铺和运河风景收住当天节奏。",
+                        "人文历史", BigDecimal.ZERO));
+            } else {
+                allStops.add(new PlannedStop(day, 1, "09:30", "工艺再发现",
+                        "中国杭州工艺美术博物馆", "结合前几日的城市体验重新认识杭州工艺，按兴趣选择重点展区。",
+                        "文化体验", BigDecimal.ZERO));
+                allStops.add(new PlannedStop(day, 2, "12:00", "湖边午餐",
+                        "湖滨时令小馆", "选择当季杭州风味，在步行范围内完成午餐与休息。",
+                        "本地美食", secondMeal));
+                allStops.add(new PlannedStop(day, 3, "15:00", "宋韵收尾",
+                        "清河坊宋韵夜游", "把最后一段时间留给自由探访，可根据返程时间随时缩短。",
+                        "人文历史", nightVisit));
+            }
+        }
         return allStops;
+    }
+
+    private List<PlannedStop> catalogPlannedStops(
+            TripRequest request,
+            List<TourismResource> resources
+    ) {
+        List<TourismResource> activities = resources.stream()
+                .filter(resource -> resource.getCategory() != TourismResource.Category.FOOD)
+                .filter(resource -> resource.getCategory() != TourismResource.Category.LODGING)
+                .toList();
+        List<TourismResource> food = resources.stream()
+                .filter(resource -> resource.getCategory() == TourismResource.Category.FOOD)
+                .toList();
+        List<TourismResource> lodging = resources.stream()
+                .filter(resource -> resource.getCategory() == TourismResource.Category.LODGING)
+                .toList();
+        if (activities.size() < 2 || food.isEmpty() || (request.getDays() > 1 && lodging.isEmpty())) {
+            throw new BusinessException(
+                    "当前目的地的真实景点、餐饮或住宿资源不足，请配置高德 Web 服务 Key 后重试。"
+            );
+        }
+
+        List<PlannedStop> stops = new ArrayList<>();
+        for (int day = 1; day <= request.getDays(); day++) {
+            Set<Long> dayResourceIds = new HashSet<>();
+            TourismResource morning = selectCatalogResource(activities, (day - 1) * 2, dayResourceIds);
+            TourismResource lunch = selectCatalogResource(food, day - 1, dayResourceIds);
+            TourismResource afternoon = selectCatalogResource(activities, (day - 1) * 2 + 1, dayResourceIds);
+
+            stops.add(catalogStop(
+                    request,
+                    morning,
+                    day,
+                    1,
+                    "09:30",
+                    "认识这座城"
+            ));
+            stops.add(catalogStop(
+                    request,
+                    lunch,
+                    day,
+                    2,
+                    "12:15",
+                    "在地午餐"
+            ));
+            stops.add(catalogStop(
+                    request,
+                    afternoon,
+                    day,
+                    3,
+                    "14:30",
+                    "下午慢游"
+            ));
+
+            if (day == 1 && request.getDays() > 1) {
+                TourismResource hotel = selectCatalogResource(lodging, 0, dayResourceIds);
+                stops.add(catalogStop(
+                        request,
+                        hotel,
+                        day,
+                        4,
+                        "18:30",
+                        "安顿入住"
+                ));
+            }
+        }
+        return stops;
+    }
+
+    private TourismResource selectCatalogResource(
+            List<TourismResource> resources,
+            int preferredIndex,
+            Set<Long> usedResourceIds
+    ) {
+        for (int offset = 0; offset < resources.size(); offset++) {
+            TourismResource resource = resources.get(Math.floorMod(preferredIndex + offset, resources.size()));
+            if (usedResourceIds.add(resource.getId())) {
+                return resource;
+            }
+        }
+        throw new BusinessException("当前目的地没有足够的不同类型资源用于编排行程。");
+    }
+
+    private PlannedStop catalogStop(
+            TripRequest request,
+            TourismResource resource,
+            int day,
+            int sequence,
+            String time,
+            String label
+    ) {
+        String description = resource.getSummary()
+                + (StringUtils.hasText(resource.getOpenHours())
+                        ? " 参考开放时间：" + resource.getOpenHours() + "。"
+                        : "");
+        return new PlannedStop(
+                day,
+                sequence,
+                time,
+                label,
+                resource.getName(),
+                description,
+                resourceTag(resource.getCategory()),
+                catalogCost(request, resource)
+        );
+    }
+
+    private BigDecimal catalogCost(TripRequest request, TourismResource resource) {
+        BigDecimal suggested = switch (resource.getCategory()) {
+            case LODGING -> request.getBudget().multiply(BigDecimal.valueOf(0.24));
+            case FOOD -> request.getBudget().multiply(BigDecimal.valueOf(0.05));
+            default -> request.getBudget().multiply(BigDecimal.valueOf(0.025));
+        };
+        BigDecimal minimum = resource.getPriceMin() == null ? BigDecimal.ZERO : resource.getPriceMin();
+        BigDecimal maximum = resource.getPriceMax() == null ? minimum : resource.getPriceMax();
+        BigDecimal cost = suggested.max(minimum);
+        if (maximum.signum() > 0) {
+            cost = cost.min(maximum.max(minimum));
+        }
+        return cost.setScale(0, RoundingMode.HALF_UP);
     }
 
     private TravelPlanResponse toResponse(TravelPlan plan) {
@@ -585,7 +762,7 @@ public class TravelPlanningService {
                 .map(entry -> new TravelPlanResponse.DayPlan(
                         entry.getKey(),
                         request.getTravelDate().plusDays(entry.getKey() - 1L).format(DISPLAY_DATE),
-                        dayTitle(entry.getKey()),
+                        dayTitle(entry.getKey(), request.getDestination()),
                         entry.getValue().stream()
                                 .map(item -> toPlanItem(item, resourceMap.get(item.getResourceId())))
                                 .toList()
@@ -695,13 +872,6 @@ public class TravelPlanningService {
         );
     }
 
-    private List<TourismResource> publishedResources(String city) {
-        return tourismResourceRepository.findAllByCityIgnoreCaseAndStatusOrderByIdAsc(
-                city,
-                TourismResource.PublicationStatus.PUBLISHED
-        ).stream().filter(TourismResource::isAvailableForPlanning).toList();
-    }
-
     private String availabilityStatus(TourismResource resource) {
         if (!resource.isReservationRequired()) {
             return "DIRECT";
@@ -766,8 +936,22 @@ public class TravelPlanningService {
         );
     }
 
-    private String dayTitle(int day) {
-        return day == 1 ? "运河手作与湖滨夜色" : "西湖慢行与宋韵收尾";
+    private String dayTitle(int day, String destination) {
+        if (!"杭州".equals(dynamicTourismCatalogService.normalizeCity(destination))) {
+            return destination + "探索第 " + day + " 日";
+        }
+        return switch (day) {
+            case 1 -> "运河手作与湖滨夜色";
+            case 2 -> "西湖慢行与宋韵街巷";
+            case 3 -> "丝绸文脉与九溪山色";
+            case 4 -> "龙井茶事与运河日常";
+            case 5 -> "工艺回望与宋韵收尾";
+            default -> "杭州慢游第" + day + "日";
+        };
+    }
+
+    private BigDecimal minimumBudgetForDays(int days) {
+        return BigDecimal.valueOf(Math.max(1, days) * 600L);
     }
 
     private BigDecimal transportationBudget(BigDecimal totalBudget) {

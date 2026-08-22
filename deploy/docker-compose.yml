@@ -1,53 +1,241 @@
-version: "3.9"
+name: verntrip
+
+x-openclaw-image: &openclaw-image
+  image: verntrip-openclaw:${OPENCLAW_VERSION:-2026.7.1}
+  build:
+    context: ../openclaw-runtime
+    dockerfile: Dockerfile
+    args:
+      OPENCLAW_IMAGE: ${OPENCLAW_IMAGE:-ghcr.io/openclaw/openclaw:2026.7.1}
+
+x-openclaw-environment: &openclaw-environment
+  HOME: /home/node
+  OPENCLAW_HOME: /home/node
+  OPENCLAW_STATE_DIR: /home/node/.openclaw
+  OPENCLAW_CONFIG_PATH: /home/node/.openclaw/openclaw.json
+  OPENCLAW_CONFIG_DIR: /home/node/.openclaw
+  OPENCLAW_WORKSPACE_DIR: /home/node/.openclaw/workspace
+  OPENCLAW_GATEWAY_TOKEN: ${OPENCLAW_GATEWAY_TOKEN:?Set OPENCLAW_GATEWAY_TOKEN in deploy/.env}
+  VERNTRIP_OPENCLAW_SERVICE_TOKEN: ${VERNTRIP_OPENCLAW_SERVICE_TOKEN:?Set VERNTRIP_OPENCLAW_SERVICE_TOKEN in deploy/.env}
+  DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:?Set DEEPSEEK_API_KEY in deploy/.env}
+  TZ: ${TZ:-Asia/Shanghai}
 
 services:
   postgres:
     image: pgvector/pgvector:pg16
-    container_name: vernflow-postgres
     restart: unless-stopped
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: vernflow
+      POSTGRES_USER: ${POSTGRES_USER:-verntrip}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in deploy/.env}
+      POSTGRES_DB: ${POSTGRES_DB:-verntrip}
+      TZ: ${TZ:-Asia/Shanghai}
     ports:
-      - "5432:5432"
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
     networks:
-      - vernflow-network
+      - verntrip-internal
 
   ai-service:
-    build: ../vernflow-ai
-    container_name: vernflow-ai-service
+    image: verntrip-ai:${APP_VERSION:-latest}
+    build:
+      context: ../vernflow-ai
+      dockerfile: Dockerfile
     restart: unless-stopped
-    ports:
-      - "8000:8000"
+    environment:
+      RAG_EMBEDDING_BACKEND: ${RAG_EMBEDDING_BACKEND:-sentence_transformers}
+      RAG_EMBEDDING_MODEL: ${RAG_EMBEDDING_MODEL:-intfloat/multilingual-e5-small}
+      RAG_EMBEDDING_DEVICE: ${RAG_EMBEDDING_DEVICE:-cpu}
+      TZ: ${TZ:-Asia/Shanghai}
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/ai/health', timeout=3)"
+      interval: 20s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
     networks:
-      - vernflow-network
+      - verntrip-internal
 
   backend:
-    build: ../vernflow-backend
-    container_name: vernflow-backend
+    image: verntrip-backend:${APP_VERSION:-latest}
+    build:
+      context: ../vernflow-backend
+      dockerfile: Dockerfile
     restart: unless-stopped
     depends_on:
-      - postgres
-      - ai-service
+      postgres:
+        condition: service_healthy
+      ai-service:
+        condition: service_healthy
     environment:
       SERVER_PORT: 8080
-      DB_URL: jdbc:postgresql://postgres:5432/vernflow
-      DB_USERNAME: postgres
-      DB_PASSWORD: postgres
+      DB_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-verntrip}
+      DB_USERNAME: ${POSTGRES_USER:-verntrip}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in deploy/.env}
       DB_DRIVER: org.postgresql.Driver
       AI_SERVICE_BASE_URL: http://ai-service:8000
+      AI_SERVICE_TIMEOUT: ${AI_SERVICE_TIMEOUT:-180s}
+      RAG_SERVICE_BASE_URL: http://ai-service:8000
+      AGENT_SERVICE_BASE_URL: http://ai-service:8000
       PAPER_UPLOAD_DIR: /app/storage/papers
+      WORKSPACE_ROOT_DIR: /app/storage/workspace
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?Set ADMIN_PASSWORD in deploy/.env}
+      USER_SESSION_TTL: ${USER_SESSION_TTL:-12h}
+      USER_AUTH_REQUIRED: ${USER_AUTH_REQUIRED:-true}
+      RAG_PROFILE: ${RAG_PROFILE:-tfidf_topk_basic}
+      ASSISTANT_ENGINE: ${ASSISTANT_ENGINE:-openclaw}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:?Set DEEPSEEK_API_KEY in deploy/.env}
+      DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.deepseek.com}
+      DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-deepseek-chat}
+      DEEPSEEK_TIMEOUT_SECONDS: ${DEEPSEEK_TIMEOUT_SECONDS:-180}
+      OPENCLAW_BASE_URL: http://openclaw-gateway:18789
+      OPENCLAW_GATEWAY_TOKEN: ${OPENCLAW_GATEWAY_TOKEN:?Set OPENCLAW_GATEWAY_TOKEN in deploy/.env}
+      OPENCLAW_AGENT_ID: ${OPENCLAW_AGENT_ID:-verntrip-main}
+      OPENCLAW_TIMEOUT: ${OPENCLAW_TIMEOUT:-180s}
+      VERNTRIP_OPENCLAW_SERVICE_TOKEN: ${VERNTRIP_OPENCLAW_SERVICE_TOKEN:?Set VERNTRIP_OPENCLAW_SERVICE_TOKEN in deploy/.env}
+      OPENCLAW_SESSION_CONTEXT_TTL: ${OPENCLAW_SESSION_CONTEXT_TTL:-30m}
+      AMAP_WEB_SERVICE_KEY: ${AMAP_WEB_SERVICE_KEY:-}
+      AMAP_WEB_SERVICE_TIMEOUT: ${AMAP_WEB_SERVICE_TIMEOUT:-8s}
+      AMAP_DYNAMIC_CATALOG_ENABLED: ${AMAP_DYNAMIC_CATALOG_ENABLED:-true}
+      AMAP_MINIMUM_CATALOG_SIZE: ${AMAP_MINIMUM_CATALOG_SIZE:-12}
+      AMAP_POI_PAGE_SIZE: ${AMAP_POI_PAGE_SIZE:-8}
+      JAVA_OPTS: ${JAVA_OPTS:--XX:MaxRAMPercentage=75.0 -Dfile.encoding=UTF-8}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      TZ: ${TZ:-Asia/Shanghai}
     ports:
-      - "8080:8080"
+      - "127.0.0.1:${BACKEND_PORT:-8080}:8080"
+    volumes:
+      - backend-storage:/app/storage
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "--show-error", "http://127.0.0.1:8080/actuator/health"]
+      interval: 20s
+      timeout: 5s
+      retries: 8
+      start_period: 45s
+    security_opt:
+      - no-new-privileges:true
     networks:
-      - vernflow-network
+      - verntrip-internal
+
+  openclaw-init:
+    <<: *openclaw-image
+    restart: "no"
+    depends_on:
+      backend:
+        condition: service_healthy
+    environment:
+      <<: *openclaw-environment
+    volumes:
+      - openclaw-state:/home/node/.openclaw
+    entrypoint: ["sh", "/opt/verntrip/bin/docker-init.sh"]
+    cap_drop:
+      - NET_RAW
+      - NET_ADMIN
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - verntrip-internal
+
+  openclaw-gateway:
+    <<: *openclaw-image
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+      openclaw-init:
+        condition: service_completed_successfully
+    environment:
+      <<: *openclaw-environment
+    volumes:
+      - openclaw-state:/home/node/.openclaw
+    ports:
+      - "127.0.0.1:${OPENCLAW_GATEWAY_PORT:-18789}:18789"
+    command:
+      - node
+      - dist/index.js
+      - gateway
+      - --bind
+      - lan
+      - --port
+      - "18789"
+    init: true
+    cap_drop:
+      - NET_RAW
+      - NET_ADMIN
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:18789/healthz').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 20s
+      timeout: 5s
+      retries: 8
+      start_period: 30s
+    networks:
+      - verntrip-internal
+
+  web:
+    image: verntrip-web:${APP_VERSION:-latest}
+    build:
+      context: ../vernflow-web
+      dockerfile: Dockerfile
+      args:
+        VITE_AMAP_JS_KEY: ${VITE_AMAP_JS_KEY:-}
+        VITE_AMAP_SECURITY_CODE: ${VITE_AMAP_SECURITY_CODE:-}
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+      openclaw-gateway:
+        condition: service_healthy
+    ports:
+      - "${WEB_PORT:-80}:80"
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://127.0.0.1/healthz"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - verntrip-internal
+
+  openclaw-cli:
+    <<: *openclaw-image
+    profiles: ["tools"]
+    depends_on:
+      openclaw-gateway:
+        condition: service_healthy
+    environment:
+      <<: *openclaw-environment
+      BROWSER: echo
+    volumes:
+      - openclaw-state:/home/node/.openclaw
+    network_mode: "service:openclaw-gateway"
+    entrypoint: ["node", "dist/index.js"]
+    stdin_open: true
+    tty: true
 
 networks:
-  vernflow-network:
+  verntrip-internal:
     driver: bridge
 
 volumes:
-  pgdata:
+  postgres-data:
+  backend-storage:
+  openclaw-state:

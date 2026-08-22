@@ -16,7 +16,7 @@ const { currentUser, hydrateUserProfile, signOutUser } = useUserAuth();
 
 const pageTitle = computed(() => route.meta.title ?? "VernFlow");
 const pageDescription = computed(() => route.meta.description ?? "");
-const showShell = computed(() => !route.meta.public && !route.meta.merchantShell);
+const showShell = computed(() => !route.meta.public && !route.meta.merchantShell && !route.meta.tourismShell);
 const showTourismShell = computed(() => Boolean(route.meta.tourismShell));
 
 function goTo(page) {
@@ -42,6 +42,7 @@ async function logout() {
 
 onMounted(async () => {
   syncWorkspaceFinderAuth();
+  await router.isReady();
 
   if (showShell.value) {
     try {
@@ -56,7 +57,7 @@ onMounted(async () => {
 watch(
   () => route.name,
   async (nextRoute, previousRoute) => {
-    if (route.meta.public || route.meta.merchantShell) {
+    if (route.meta.public || route.meta.merchantShell || route.meta.tourismShell) {
       return;
     }
 

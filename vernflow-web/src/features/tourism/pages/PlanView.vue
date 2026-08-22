@@ -1,10 +1,11 @@
 <template>
   <main class="planner-page">
     <header class="planner-topbar">
-      <RouterLink class="back-link" :to="{ name: 'travel-home' }">← 返回首页</RouterLink>
       <div class="title-group">
-        <span>AI TRAVEL STUDIO</span>
-        <h1>和山水灵一起，把想法变成行程</h1>
+        <RouterLink class="back-link" :to="{ name: 'travel-home' }">返回旅行首页</RouterLink>
+        <span>AI TRAVEL STUDIO / OPENCLAW</span>
+        <h1>先说说，你想怎样出发</h1>
+        <p>不用一次想清所有细节。山水灵会从一句话里整理出目的地、同行人和旅行节奏，再把它们编排成可以真正出发的行程。</p>
       </div>
       <div class="planner-demo-actions">
         <span class="service-state"><i></i>{{ engineLabel }}</span>
@@ -14,21 +15,30 @@
       </div>
     </header>
 
+    <nav class="planner-stage-rail" aria-label="旅行规划进度">
+      <span :class="{ active: !messages.length }"><b>01</b> 说出想法</span>
+      <i></i>
+      <span :class="{ active: messages.length && !state.currentPlan }"><b>02</b> 核对条件</span>
+      <i></i>
+      <span :class="{ active: state.currentPlan }"><b>03</b> 收下行程</span>
+    </nav>
+
     <div class="planner-workspace">
       <section class="assistant-panel">
         <div class="panel-heading">
           <div class="assistant-mark">灵</div>
           <div>
-            <h2>旅行规划助手</h2>
-            <p>先聊聊想去哪里、为什么出发，以及不希望旅程太累还是太赶。</p>
+            <span>TRAVEL CONVERSATION</span>
+            <h2>从一句真实的想法开始</h2>
+            <p>目的地、预算和偏好会在对话中自动整理到右侧，不需要重复填写。</p>
           </div>
         </div>
 
         <div ref="chatRef" class="chat-stream">
           <div v-if="messages.length === 0" class="welcome-card">
-            <span>从一句模糊的想法开始就可以</span>
-            <h3>这次旅行，你最想获得什么感受？</h3>
-            <p>我会帮你梳理目的地、节奏和体验偏好。右侧条件可以随时修改，不必一次想完整。</p>
+            <span>从一句模糊的想法开始</span>
+            <h3>这趟旅程，你想记住什么？</h3>
+            <p>可以说一个地方、一种心情，或一件想和同行人完成的小事。其余条件，我们边聊边补全。</p>
             <div class="quick-questions">
               <button v-for="question in quickQuestions" :key="question" type="button" @click="sendQuick(question)">
                 {{ question }}
@@ -51,7 +61,7 @@
             <button v-if="message.readyToGenerate" class="message-generate" type="button" :disabled="state.isGenerating" @click="handleSubmit">
               {{ state.isGenerating ? '正在生成…' : '按这些条件生成行程 →' }}
             </button>
-            <RouterLink v-if="message.generatedPlan" class="message-plan-link" :to="{ name: 'travel-plan' }">
+            <RouterLink v-if="message.generatedPlan" class="message-plan-link" :to="{ name: 'travel-plan', query: { plan: String(state.currentPlan.id) } }">
               查看完整日程与预算 →
             </RouterLink>
           </article>
@@ -96,7 +106,7 @@
           <div class="form-row two-columns">
             <label>
               <span>目的地</span>
-              <input v-model.trim="form.destination" type="text" placeholder="目前支持杭州" />
+              <input v-model.trim="form.destination" type="text" placeholder="例如：杭州、苏州、南京" />
             </label>
             <label>
               <span>出发地</span>
@@ -110,16 +120,30 @@
               <input v-model="form.date" type="date" />
             </label>
             <label>
-              <span>出行天数</span>
-              <select v-model="form.days">
-                <option value="1">1 天</option>
-                <option value="2">2 天</option>
-              </select>
+              <span>出行天数 <small>1–7 天</small></span>
+              <span class="number-input days-input">
+                <input v-model.number="form.days" type="number" min="1" max="7" step="1" inputmode="numeric" />
+                <b>天</b>
+              </span>
             </label>
           </div>
 
           <fieldset class="form-row">
-            <legend>预算范围</legend>
+            <legend>旅行总预算 <small>可填写具体金额</small></legend>
+            <label class="budget-input">
+              <span>¥</span>
+              <input
+                v-model.number="form.budget"
+                type="number"
+                :min="minimumBudget"
+                max="200000"
+                step="100"
+                inputmode="numeric"
+                aria-label="旅行总预算"
+              />
+              <b>元</b>
+            </label>
+            <small class="input-hint">{{ form.days || 1 }} 天行程建议总预算不低于 ¥{{ minimumBudget.toLocaleString('zh-CN') }}</small>
             <div class="chip-list">
               <button
                 v-for="option in budgetOptions"
@@ -142,6 +166,27 @@
                 @click="form.travelers = option"
               >{{ option }}</button>
             </div>
+            <label class="custom-text-input">
+              <span>自定义</span>
+              <input v-model.trim="form.travelers" type="text" maxlength="40" placeholder="例如：两位朋友和一位长辈" />
+            </label>
+          </fieldset>
+
+          <fieldset class="form-row">
+            <legend>旅行节奏</legend>
+            <div class="chip-list">
+              <button
+                v-for="option in paceOptions"
+                :key="option"
+                type="button"
+                :class="{ selected: form.pace === option }"
+                @click="form.pace = option"
+              >{{ option }}</button>
+            </div>
+            <label class="custom-text-input">
+              <span>自定义</span>
+              <input v-model.trim="form.pace" type="text" maxlength="40" placeholder="例如：上午充实，下午尽量轻松" />
+            </label>
           </fieldset>
 
           <fieldset class="form-row">
@@ -154,6 +199,22 @@
                 :class="{ selected: form.interests.includes(option) }"
                 @click="toggleInterest(option)"
               >{{ option }}</button>
+            </div>
+            <div v-if="customInterests.length" class="custom-interest-list" aria-label="已添加的自定义兴趣">
+              <span>已添加</span>
+              <button v-for="option in customInterests" :key="option" type="button" @click="toggleInterest(option)">
+                {{ option }} <b>×</b>
+              </button>
+            </div>
+            <div class="custom-interest-input">
+              <input
+                v-model.trim="customInterest"
+                type="text"
+                maxlength="40"
+                placeholder="输入其他兴趣，如摄影、咖啡探店"
+                @keydown.enter.prevent="addCustomInterest"
+              />
+              <button type="button" :disabled="!customInterest" @click="addCustomInterest">添加</button>
             </div>
           </fieldset>
 
@@ -182,7 +243,7 @@
               <span>预算 ¥{{ Number(state.currentPlan.budget.total).toLocaleString('zh-CN') }}</span>
               <span>{{ state.currentPlan.request.travelers }}</span>
             </div>
-            <RouterLink :to="{ name: 'travel-plan' }">查看完整日程与预算 →</RouterLink>
+            <RouterLink :to="{ name: 'travel-plan', query: { plan: String(state.currentPlan.id) } }">查看完整日程与预算 →</RouterLink>
           </section>
         </Transition>
       </aside>
@@ -198,9 +259,10 @@ import { analyzeTravelConversation } from '@/lib/travelAssistantApi'
 
 const route = useRoute()
 const router = useRouter()
-const { state, interests, travelerOptions, updateRequest, generatePlan } = useTravelPlanning()
+const { state, interests, travelerOptions, paceOptions, updateRequest, generatePlan } = useTravelPlanning()
 const chatRef = ref(null)
 const input = ref('')
+const customInterest = ref('')
 const typing = ref(false)
 const messages = ref([])
 const validationError = ref('')
@@ -210,16 +272,10 @@ const demoRunning = ref(false)
 
 const engineLabel = computed(() => assistantEngine.value === 'openclaw' ? 'OpenClaw 规划中枢' : '结构化规划服务')
 
-const budgetOptions = [
-  { label: '¥1,200 左右', value: 1200 },
-  { label: '¥3,000 左右', value: 3000 },
-  { label: '¥4,500 左右', value: 4500 },
-]
-
 const quickQuestions = [
   '从上海出发，周末两天带孩子慢游杭州，想体验非遗和本地美食，预算3000元',
-  '带孩子体验非遗，怎样安排不累？',
-  '一个人从上海去杭州，想避开热门打卡点，看看本地生活',
+  '从南京出发去苏州三天，想看园林、博物馆，也想吃本地菜',
+  '一个人去成都四天，想避开太赶的打卡路线，看看本地生活',
 ]
 const demoQuestion = quickQuestions[0]
 
@@ -227,12 +283,23 @@ const form = reactive({
   destination: state.request.destination,
   departure: state.request.departure,
   date: state.request.date,
-  days: String(state.request.days),
+  days: Number(state.request.days),
   budget: Number(state.request.budget),
   travelers: state.request.travelers,
   pace: state.request.pace,
   interests: [...state.request.interests],
   notes: state.request.notes,
+})
+
+const minimumBudget = computed(() => Math.max(600, (Number(form.days) || 1) * 600))
+const customInterests = computed(() => form.interests.filter((option) => !interests.includes(option)))
+const budgetOptions = computed(() => {
+  const days = Math.max(1, Number(form.days) || 1)
+  return [
+    { label: `轻省 ¥${(days * 800).toLocaleString('zh-CN')}`, value: days * 800 },
+    { label: `舒适 ¥${(days * 1500).toLocaleString('zh-CN')}`, value: days * 1500 },
+    { label: `品质 ¥${(days * 2500).toLocaleString('zh-CN')}`, value: days * 2500 },
+  ]
 })
 
 function toggleInterest(option) {
@@ -241,18 +308,35 @@ function toggleInterest(option) {
   else form.interests.push(option)
 }
 
+function addCustomInterest() {
+  const value = customInterest.value.trim()
+  if (!value) return
+  if (!form.interests.includes(value)) form.interests.push(value)
+  customInterest.value = ''
+}
+
 async function handleSubmit() {
   validationError.value = ''
   if (!form.destination || !form.departure || !form.date) {
     validationError.value = '请填写目的地、出发地和出发日期。'
     return
   }
+  const days = Number(form.days)
+  if (!Number.isInteger(days) || days < 1 || days > 7) {
+    validationError.value = '出行天数请填写 1 至 7 天的整数。'
+    return null
+  }
   if (!form.travelers) {
     validationError.value = '请确认同行伙伴。'
     return null
   }
-  if (!form.budget || !form.pace) {
-    validationError.value = '请确认预算和旅行节奏。'
+  const budget = Number(form.budget)
+  if (!Number.isFinite(budget) || budget < minimumBudget.value || budget > 200000) {
+    validationError.value = `请填写 ¥${minimumBudget.value.toLocaleString('zh-CN')} 至 ¥200,000 之间的旅行总预算。`
+    return null
+  }
+  if (!form.pace) {
+    validationError.value = '请确认旅行节奏。'
     return null
   }
   if (!form.interests.length) {
@@ -327,7 +411,7 @@ async function runDemo() {
     const result = await sendQuestion(demoQuestion)
     if (!result?.readyToGenerate) return
     const plan = await handleSubmit()
-    if (plan) await router.push({ name: 'travel-plan' })
+    if (plan) await router.push({ name: 'travel-plan', query: { plan: String(plan.id) } })
   } finally {
     demoRunning.value = false
   }
@@ -352,7 +436,7 @@ function applyDraft(draft) {
   form.destination = draft.destination || ''
   form.departure = draft.departure || ''
   form.date = draft.date || ''
-  form.days = draft.days ? String(draft.days) : ''
+  form.days = draft.days ? Number(draft.days) : ''
   form.travelers = draft.travelers || ''
   form.budget = Number(draft.budget || 0)
   form.pace = draft.pace || ''
@@ -362,11 +446,27 @@ function applyDraft(draft) {
 
 function scrollChat() {
   nextTick(() => {
-    if (chatRef.value) chatRef.value.scrollTop = chatRef.value.scrollHeight
+    chatRef.value?.lastElementChild?.scrollIntoView({ behavior: 'smooth', block: 'center' })
   })
 }
 
 onMounted(() => {
+  const destination = typeof route.query.destination === 'string' ? route.query.destination.trim() : ''
+  const focus = typeof route.query.focus === 'string' ? route.query.focus.trim() : ''
+  const suggestedInterests = typeof route.query.interests === 'string'
+    ? route.query.interests.split(',').map((item) => item.trim()).filter(Boolean)
+    : []
+  if (destination) form.destination = destination
+  if (suggestedInterests.length) {
+    form.interests = [...new Set([...form.interests, ...suggestedInterests])]
+  }
+  if (focus) {
+    form.notes = [form.notes, `希望行程包含或重点考虑：${focus}。`].filter(Boolean).join('\n')
+    messages.value.push({
+      role: 'ai',
+      text: `已经把“${focus}”作为${destination || '这次旅程'}的重点地点，并同步到右侧条件。补充出发地、同行人和预算后即可生成。`,
+    })
+  }
   if (route.query.demo === '1') {
     window.setTimeout(runDemo, 260)
     return
@@ -941,7 +1041,7 @@ onMounted(() => {
   to { opacity: 1; transform: translateY(-2px); }
 }
 
-@media (max-width: 1050px) {
+@media (max-width: 900px) {
   .planner-workspace {
     grid-template-columns: 1fr;
     height: auto;
@@ -967,5 +1067,599 @@ onMounted(() => {
   .chat-composer span { display: none; }
   .conditions-panel { padding: 18px 15px; }
   .two-columns { grid-template-columns: 1fr; }
+}
+
+/* The planning flow reads like a travel journal instead of a dashboard. */
+.planner-page {
+  min-height: calc(100vh - 77px);
+  padding-bottom: 90px;
+  background:
+    linear-gradient(90deg, rgba(36, 95, 90, .026) 1px, transparent 1px),
+    linear-gradient(rgba(36, 95, 90, .02) 1px, transparent 1px),
+    radial-gradient(circle at 84% 7%, rgba(36, 95, 90, .12), transparent 24%),
+    #f6f0e5;
+  background-size: 42px 42px, 42px 42px, auto, auto;
+}
+
+.planner-topbar {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 56px;
+  width: min(1280px, calc(100% - 72px));
+  margin: 0 auto;
+  padding: 72px 0 42px;
+  border: 0;
+  background: transparent;
+  backdrop-filter: none;
+}
+
+.title-group {
+  max-width: 790px;
+  text-align: left;
+}
+
+.title-group .back-link {
+  display: block;
+  width: max-content;
+  margin-bottom: 27px;
+  color: var(--teal-deep);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 1px;
+}
+
+.title-group .back-link::before {
+  margin-right: 8px;
+  content: "←";
+  color: var(--terracotta);
+}
+
+.title-group > span {
+  color: var(--terracotta-deep);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 2.8px;
+}
+
+.title-group h1 {
+  margin: 10px 0 16px;
+  color: var(--ink);
+  font-family: 'Noto Serif SC', 'Songti SC', serif;
+  font-size: clamp(42px, 5.2vw, 72px);
+  font-weight: 600;
+  letter-spacing: -3px;
+  line-height: 1.12;
+}
+
+.title-group > p {
+  max-width: 700px;
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 14px;
+  line-height: 1.9;
+}
+
+.planner-demo-actions {
+  min-width: 190px;
+  justify-items: start;
+  padding-bottom: 4px;
+}
+
+.planner-demo-actions button {
+  margin-top: 8px;
+  padding: 11px 17px;
+  border-color: rgba(36, 95, 90, .35);
+  border-radius: 2px;
+  background: transparent;
+  font-size: 11px;
+}
+
+.service-state {
+  justify-self: start;
+  font-size: 10px;
+}
+
+.planner-stage-rail {
+  display: grid;
+  grid-template-columns: auto 1fr auto 1fr auto;
+  align-items: center;
+  gap: 18px;
+  width: min(1280px, calc(100% - 72px));
+  margin: 0 auto 36px;
+  padding: 17px 0;
+  border-top: 1px solid rgba(44, 36, 27, .14);
+  border-bottom: 1px solid rgba(44, 36, 27, .14);
+}
+
+.planner-stage-rail span {
+  color: rgba(44, 36, 27, .42);
+  font-family: 'Noto Serif SC', serif;
+  font-size: 12px;
+  letter-spacing: 1px;
+  white-space: nowrap;
+}
+
+.planner-stage-rail span b {
+  margin-right: 7px;
+  color: inherit;
+  font-family: Georgia, serif;
+  font-size: 10px;
+}
+
+.planner-stage-rail span.active {
+  color: var(--teal-deep);
+  font-weight: 700;
+}
+
+.planner-stage-rail i {
+  height: 1px;
+  background: rgba(44, 36, 27, .12);
+}
+
+.planner-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 410px;
+  align-items: start;
+  gap: clamp(32px, 5vw, 72px);
+  width: min(1280px, calc(100% - 72px));
+  height: auto;
+  min-height: 0;
+  margin: 0 auto;
+}
+
+.assistant-panel,
+.conditions-panel {
+  min-width: 0;
+  overflow: visible;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+}
+
+.assistant-panel {
+  display: block;
+  padding-top: 3px;
+}
+
+.panel-heading {
+  gap: 17px;
+  padding: 0 0 25px;
+  border-bottom: 1px solid rgba(44, 36, 27, .13);
+}
+
+.assistant-mark {
+  width: 52px;
+  height: 58px;
+  border-radius: 50% 50% 46% 46%;
+  background: var(--teal-deep);
+  font-size: 24px;
+  box-shadow: 5px 5px 0 rgba(193, 101, 70, .45);
+}
+
+.panel-heading span {
+  color: var(--terracotta-deep);
+  font-family: Georgia, serif;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 2px;
+}
+
+.panel-heading h2 {
+  margin: 4px 0 3px;
+  font-size: 23px;
+}
+
+.panel-heading p {
+  font-size: 12px;
+}
+
+.chat-stream {
+  display: flex;
+  min-height: 430px;
+  padding: 34px 0 22px;
+  overflow: visible;
+}
+
+.welcome-card {
+  max-width: 720px;
+  margin: 0;
+  padding: 45px clamp(24px, 5vw, 58px);
+  border: 0;
+  border-left: 4px solid var(--terracotta);
+  border-radius: 0;
+  background:
+    radial-gradient(circle at 88% 18%, rgba(36, 95, 90, .13), transparent 28%),
+    rgba(255, 253, 248, .68);
+  text-align: left;
+}
+
+.welcome-card > span {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 2px;
+}
+
+.welcome-card h3 {
+  max-width: 540px;
+  margin: 14px 0 13px;
+  font-size: clamp(30px, 3.4vw, 44px);
+  line-height: 1.35;
+}
+
+.welcome-card p {
+  max-width: 590px;
+  font-size: 13px;
+}
+
+.quick-questions {
+  display: grid;
+  justify-content: stretch;
+  gap: 9px;
+  margin-top: 28px;
+}
+
+.quick-questions button {
+  padding: 11px 0;
+  border: 0;
+  border-bottom: 1px solid rgba(36, 95, 90, .16);
+  border-radius: 0;
+  background: transparent;
+  font-size: 12px;
+  line-height: 1.55;
+  text-align: left;
+}
+
+.quick-questions button::after {
+  float: right;
+  content: "↗";
+  color: var(--terracotta);
+}
+
+.message {
+  max-width: 76%;
+  padding: 16px 19px;
+  border-radius: 2px;
+}
+
+.message.user {
+  border-bottom-right-radius: 0;
+  background: var(--terracotta);
+}
+
+.message.ai {
+  border: 1px solid rgba(44, 36, 27, .1);
+  border-left: 3px solid var(--teal);
+  border-bottom-left-radius: 0;
+  background: rgba(255, 253, 248, .84);
+}
+
+.message p {
+  font-size: 14px;
+}
+
+.chat-composer {
+  position: sticky;
+  bottom: 18px;
+  z-index: 4;
+  margin: 0;
+  padding: 16px 18px 12px;
+  border: 1px solid rgba(44, 36, 27, .18);
+  border-radius: 2px;
+  background: rgba(255, 253, 248, .96);
+  box-shadow: 0 18px 45px rgba(44, 36, 27, .12);
+  backdrop-filter: blur(14px);
+}
+
+.chat-composer textarea {
+  min-height: 58px;
+  font-size: 14px;
+}
+
+.chat-composer button {
+  min-width: 92px;
+  padding: 10px 20px;
+  border-radius: 2px;
+  background: var(--teal-deep);
+  font-family: 'Noto Serif SC', serif;
+}
+
+.conditions-panel {
+  position: sticky;
+  top: 96px;
+  max-height: none;
+  padding: 29px 30px 30px;
+  border-top: 4px solid var(--teal-deep);
+  background: rgba(255, 253, 248, .88);
+  box-shadow: 0 22px 60px rgba(44, 36, 27, .08);
+}
+
+.conditions-heading {
+  align-items: start;
+  margin-bottom: 23px;
+}
+
+.conditions-heading h2 {
+  margin-top: 6px;
+  font-size: 25px;
+}
+
+.conditions-heading > div > span {
+  color: var(--terracotta-deep);
+}
+
+.conditions-form {
+  gap: 19px;
+}
+
+.form-row label > span,
+.conditions-form .notes-field > span,
+.conditions-form legend {
+  margin-bottom: 7px;
+  color: var(--ink);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.conditions-form input,
+.conditions-form select {
+  padding: 11px 0;
+  border: 0;
+  border-bottom: 1px solid rgba(44, 36, 27, .24);
+  border-radius: 0;
+  background: transparent;
+  font-size: 13px;
+}
+
+.conditions-form input:focus,
+.conditions-form select:focus {
+  border-bottom-color: var(--teal-deep);
+}
+
+.form-row label > span small {
+  margin-left: 4px;
+  color: var(--ink-soft);
+  font-size: 9px;
+  font-weight: 400;
+}
+
+.number-input {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  border-bottom: 1px solid rgba(44, 36, 27, .24);
+}
+
+.number-input input {
+  width: 100%;
+  border: 0;
+}
+
+.number-input b {
+  color: var(--teal-deep);
+  font-size: 11px;
+}
+
+.budget-input {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 8px;
+  margin: 2px 0 7px;
+  padding: 10px 13px 8px;
+  border: 1px solid rgba(36, 95, 90, .22);
+  background: rgba(247, 242, 233, .58);
+}
+
+.form-row .budget-input > span {
+  margin: 0;
+  color: var(--terracotta-deep);
+  font-family: Georgia, serif;
+  font-size: 19px;
+  font-weight: 700;
+}
+
+.budget-input input {
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  color: var(--ink);
+  font-family: Georgia, 'Noto Serif SC', serif;
+  font-size: 25px;
+  font-weight: 700;
+}
+
+.budget-input b {
+  color: var(--ink-soft);
+  font-size: 10px;
+}
+
+.input-hint {
+  display: block;
+  margin: 0 0 10px;
+  color: var(--ink-soft);
+  font-size: 9px;
+  line-height: 1.5;
+}
+
+.custom-text-input {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr);
+  align-items: center;
+  gap: 7px;
+  margin-top: 9px;
+}
+
+.form-row .custom-text-input > span {
+  margin: 0;
+  color: var(--terracotta-deep);
+  font-size: 10px;
+}
+
+.custom-text-input input {
+  min-width: 0;
+  padding: 8px 0;
+  font-size: 11px;
+}
+
+.custom-interest-input {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  margin-top: 9px;
+}
+
+.custom-interest-list {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 9px;
+}
+
+.custom-interest-list > span {
+  margin-right: 2px;
+  color: var(--ink-soft);
+  font-size: 9px;
+}
+
+.custom-interest-list button {
+  padding: 5px 8px;
+  border: 1px solid rgba(201, 91, 62, .22);
+  border-radius: 2px;
+  background: rgba(201, 91, 62, .07);
+  color: var(--terracotta-deep);
+  font-size: 10px;
+}
+
+.custom-interest-list button b {
+  margin-left: 4px;
+  font-weight: 400;
+}
+
+.custom-interest-input input {
+  min-width: 0;
+  padding: 9px 0;
+  font-size: 11px;
+}
+
+.custom-interest-input button {
+  padding: 0 13px;
+  border: 1px solid rgba(36, 95, 90, .28);
+  border-radius: 2px;
+  background: transparent;
+  color: var(--teal-deep);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.custom-interest-input button:disabled {
+  cursor: not-allowed;
+  opacity: .4;
+}
+
+.conditions-form .notes-field {
+  display: grid;
+  gap: 5px;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.conditions-form .notes-field textarea {
+  min-height: 62px;
+  padding: 10px 11px;
+  border: 1px solid rgba(44, 36, 27, .16);
+  background: rgba(247, 242, 233, .64);
+  font-size: 12px;
+}
+
+.chip-list button {
+  padding: 8px 11px;
+  border-radius: 2px;
+  background: transparent;
+  font-size: 11px;
+}
+
+.chip-list button:hover,
+.chip-list button.selected {
+  border-color: var(--teal-deep);
+  background: var(--teal-deep);
+}
+
+.generate-button {
+  min-height: 51px;
+  padding: 0 18px;
+  border-radius: 2px;
+  box-shadow: 4px 4px 0 rgba(36, 95, 90, .55);
+  font-size: 14px;
+}
+
+.plan-preview {
+  margin-top: 25px;
+  padding: 20px;
+  border-radius: 2px;
+  background: #e4eee7;
+}
+
+@media (max-width: 1050px) {
+  .planner-topbar,
+  .planner-stage-rail,
+  .planner-workspace {
+    width: min(100% - 40px, 760px);
+  }
+
+  .planner-topbar {
+    align-items: start;
+    padding-top: 52px;
+  }
+
+  .planner-workspace {
+    grid-template-columns: 1fr;
+    padding-bottom: 0;
+  }
+
+  .assistant-panel {
+    min-height: 0;
+    border-radius: 0;
+  }
+
+  .conditions-panel {
+    position: static;
+    border-radius: 0;
+  }
+}
+
+@media (max-width: 680px) {
+  .planner-page { padding-bottom: 50px; }
+  .planner-topbar,
+  .planner-stage-rail,
+  .planner-workspace { width: calc(100% - 28px); }
+  .planner-topbar { display: grid; gap: 23px; padding: 35px 0 28px; }
+  .title-group { grid-column: auto; grid-row: auto; }
+  .title-group h1 { font-size: 40px; letter-spacing: -2px; }
+  .title-group > p { font-size: 12px; }
+  .planner-demo-actions { display: flex; align-items: center; justify-content: space-between; }
+  .planner-demo-actions button { margin-top: 0; }
+  .planner-stage-rail { gap: 7px; margin-bottom: 25px; }
+  .planner-stage-rail span { font-size: 10px; letter-spacing: 0; }
+  .planner-stage-rail span b { display: none; }
+  .planner-workspace { margin-top: 0; }
+  .panel-heading { padding: 0 0 20px; }
+  .assistant-mark { width: 45px; height: 49px; }
+  .panel-heading h2 { font-size: 20px; }
+  .panel-heading p { font-size: 11px; }
+  .chat-stream { min-height: 390px; padding: 23px 0 17px; }
+  .welcome-card { padding: 31px 20px; }
+  .welcome-card h3 { font-size: 30px; }
+  .message { max-width: 91%; }
+  .chat-composer { margin: 0; }
+  .chat-composer span { display: none; }
+  .conditions-panel { padding: 24px 19px; }
+  .two-columns { grid-template-columns: 1fr 1fr; }
 }
 </style>

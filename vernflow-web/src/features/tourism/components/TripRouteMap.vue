@@ -315,4 +315,110 @@ onBeforeUnmount(() => {
   .trip-route-stops li:nth-child(2) { border-right: 0; }
   .trip-route-stops li:nth-child(n + 3) { border-top: 1px solid rgba(32, 54, 48, .08); }
 }
+
+/* Present route evidence as part of the itinerary, not as a data widget. */
+.trip-route-card {
+  margin-top: 0;
+  overflow: hidden;
+  border: 0;
+  border-top: 4px solid #276d62;
+  background: rgba(251, 248, 241, .94);
+  box-shadow: 0 20px 50px rgba(40, 71, 64, .08);
+}
+
+.trip-route-head {
+  align-items: center;
+  padding: 27px 29px 24px;
+  background: linear-gradient(100deg, rgba(39, 109, 98, .065), transparent 58%);
+}
+
+.trip-route-head p {
+  margin-bottom: 9px;
+  font-size: 10px;
+}
+
+.trip-route-head h3 {
+  font-family: 'Noto Serif SC', 'Songti SC', serif;
+  font-size: clamp(25px, 2.5vw, 36px);
+  letter-spacing: -1px;
+}
+
+.trip-route-head > span {
+  padding: 8px 11px;
+  border: 1px solid rgba(39, 109, 98, .16);
+  background: rgba(255, 253, 248, .66);
+  font-size: 10px;
+}
+
+.trip-map-shell,
+.trip-map-canvas {
+  min-height: 475px;
+}
+
+.trip-route-stops {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.trip-route-stops li {
+  grid-template-columns: 34px minmax(0, 1fr) auto;
+  gap: 5px 11px;
+  min-height: 105px;
+  padding: 18px 17px;
+  border-top: 1px solid rgba(32, 54, 48, .08);
+}
+
+.trip-route-stops li:nth-child(even) {
+  border-right: 0;
+}
+
+.trip-route-stops li > span {
+  width: 29px;
+  height: 29px;
+  grid-row: 1 / 4;
+  font-size: 12px;
+}
+
+.trip-route-stops small {
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.trip-route-stops b {
+  margin-top: 2px;
+  font-family: 'Noto Serif SC', 'Songti SC', serif;
+  font-size: 13px;
+}
+
+.trip-route-stops li > div > span {
+  margin-top: 3px;
+  font-size: 10px;
+}
+
+.trip-route-stops em {
+  grid-column: 2 / -1;
+  font-size: 9px;
+}
+
+.trip-route-stops mark {
+  grid-column: 3;
+  grid-row: 1;
+  align-self: start;
+  padding: 4px 7px;
+  font-size: 8px;
+  white-space: nowrap;
+}
+
+.trip-route-warning {
+  padding: 12px 18px;
+  font-size: 10px;
+  line-height: 1.6;
+}
+
+@media (max-width: 760px) {
+  .trip-route-head { padding: 23px 20px; }
+  .trip-map-shell,
+  .trip-map-canvas { min-height: 360px; }
+  .trip-route-stops { grid-template-columns: 1fr; }
+  .trip-route-stops li { border-right: 0; }
+}
 </style>

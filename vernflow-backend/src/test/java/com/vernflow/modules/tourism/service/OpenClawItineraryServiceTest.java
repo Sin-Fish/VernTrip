@@ -124,6 +124,64 @@ class OpenClawItineraryServiceTest {
     }
 
     @Test
+    void shouldMoveASingleTrustedLodgingNodeToDayOne() {
+        when(sessionContextService.bind(eq(7L), eq(null), eq(false), eq(List.of())))
+                .thenReturn(new OpenClawSessionContextService.BoundSession(
+                        "verntrip:lodging-normalization-test",
+                        LocalDateTime.now().plusMinutes(30)
+                ));
+        when(gatewayClient.createResponse(
+                eq("verntrip:lodging-normalization-test"),
+                anyString(),
+                anyString()
+        )).thenReturn(new OpenClawGatewayClient.ShadowResponse(
+                "resp_lodging_normalization",
+                """
+                        {
+                          "title":"杭州两日慢游",
+                          "summary":"可信节点完整，住宿节点将在后端移动到第一天末尾。",
+                          "matchScore":88,
+                          "days":[
+                            {"day":1,"items":[
+                              {"time":"09:30","label":"参观","resourceName":"工艺博物馆","description":"室内参观。","cost":400},
+                              {"time":"12:00","label":"午餐","resourceName":"运河杭帮菜","description":"本地午餐。","cost":400},
+                              {"time":"14:30","label":"手作","resourceName":"桥畔手作课堂","description":"下午体验。","cost":400}
+                            ]},
+                            {"day":2,"items":[
+                              {"time":"09:00","label":"办理入住","resourceName":"湖滨亲子酒店","description":"全程唯一住宿。","cost":1800},
+                              {"time":"10:00","label":"湖边慢行","resourceName":"西湖慢行段","description":"轻松步行。","cost":200},
+                              {"time":"12:00","label":"午餐","resourceName":"湖滨时令小馆","description":"就近午餐。","cost":400},
+                              {"time":"15:00","label":"夜游","resourceName":"清河坊夜游","description":"街区漫步。","cost":200}
+                            ]}
+                          ]
+                        }
+                        """,
+                400L,
+                700L
+        ));
+
+        OpenClawItineraryService.AgentItinerary itinerary = service.generate(
+                7L,
+                request(),
+                resources()
+        ).orElseThrow();
+
+        List<OpenClawItineraryService.AgentStop> lodgingStops = itinerary.stops().stream()
+                .filter(stop -> stop.resourceName().equals("湖滨亲子酒店"))
+                .toList();
+        assertThat(lodgingStops).singleElement().satisfies(stop -> {
+            assertThat(stop.day()).isEqualTo(1);
+            assertThat(stop.sequence()).isEqualTo(4);
+            assertThat(stop.time()).isEqualTo("18:00");
+        });
+        assertThat(itinerary.stops()).filteredOn(stop -> stop.day() == 2).hasSize(3);
+        BigDecimal normalizedTotal = itinerary.stops().stream()
+                .map(OpenClawItineraryService.AgentStop::cost)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        assertThat(normalizedTotal.compareTo(new BigDecimal("2400"))).isLessThanOrEqualTo(0);
+    }
+
+    @Test
     void shouldPreserveAnUnsatisfiedReplacementDecisionForBackendValidation() {
         when(sessionContextService.bind(eq(7L), eq(null), eq(false), eq(List.of())))
                 .thenReturn(new OpenClawSessionContextService.BoundSession(

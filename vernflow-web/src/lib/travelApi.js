@@ -18,11 +18,20 @@ export function createTravelPlan(request) {
   }));
 }
 
+export function listTourismResources(city) {
+  const params = new URLSearchParams({ city });
+  return userRequest(`/api/tourism/resources?${params.toString()}`);
+}
+
 export function adjustTravelPlan(planId, adjustment) {
   return userRequest(
     `/api/tourism/plans/${planId}/adjust`,
     jsonRequest("POST", adjustment),
   );
+}
+
+export function getTravelPlan(planId) {
+  return userRequest(`/api/tourism/plans/${planId}`);
 }
 
 export function saveTravelPlan(planId) {
