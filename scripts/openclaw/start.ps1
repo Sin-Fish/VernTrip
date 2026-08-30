@@ -18,7 +18,7 @@ $stderrPath = Join-Path $script:LogRoot "gateway.err.log"
 Normalize-ProcessPathEnvironment
 $startArguments = @{
     FilePath = $nodePath
-    ArgumentList = @($script:OpenClawCliPath, "gateway", "--bind", "loopback", "--port", $Port)
+    ArgumentList = @($script:OpenClawCliPath, "gateway", "run", "--bind", "loopback", "--port", $Port)
     WindowStyle = "Hidden"
     RedirectStandardOutput = $stdoutPath
     RedirectStandardError = $stderrPath

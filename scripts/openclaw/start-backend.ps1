@@ -48,8 +48,8 @@ if ($null -eq $jar) {
     throw "Backend jar is missing. Run without -SkipBuild first."
 }
 
-Normalize-ProcessPathEnvironment
 $javaPath = (Get-Command java.exe -ErrorAction Stop).Source
+Normalize-ProcessPathEnvironment
 $stdoutPath = Join-Path $script:LogRoot "backend.out.log"
 $stderrPath = Join-Path $script:LogRoot "backend.err.log"
 $startArguments = @{

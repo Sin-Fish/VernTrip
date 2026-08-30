@@ -9,6 +9,7 @@ import com.vernflow.modules.tourism.repository.TourismResourceRepository;
 
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
+import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -17,6 +18,7 @@ import java.util.List;
 import java.util.Map;
 
 @Component
+@Order(10)
 public class TourismDemoDataInitializer implements ApplicationRunner {
 
     private static final String CITY = "杭州";

@@ -5,13 +5,6 @@
         <RouterLink class="back-link" :to="{ name: 'travel-home' }">返回旅行首页</RouterLink>
         <span>AI TRAVEL STUDIO / OPENCLAW</span>
         <h1>先说说，你想怎样出发</h1>
-        <p>不用一次想清所有细节。山水灵会从一句话里整理出目的地、同行人和旅行节奏，再把它们编排成可以真正出发的行程。</p>
-      </div>
-      <div class="planner-demo-actions">
-        <span class="service-state"><i></i>{{ engineLabel }}</span>
-        <button type="button" :disabled="demoRunning || typing || state.isGenerating" @click="runDemo">
-          {{ demoRunning ? '演示进行中…' : '一键生成演示行程' }}
-        </button>
       </div>
     </header>
 
@@ -253,12 +246,11 @@
 
 <script setup>
 import { computed, nextTick, onMounted, reactive, ref } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { useRoute } from 'vue-router'
 import { useTravelPlanning } from '@/composables/useTravelPlanning'
 import { analyzeTravelConversation } from '@/lib/travelAssistantApi'
 
 const route = useRoute()
-const router = useRouter()
 const { state, interests, travelerOptions, paceOptions, updateRequest, generatePlan } = useTravelPlanning()
 const chatRef = ref(null)
 const input = ref('')
@@ -267,18 +259,12 @@ const typing = ref(false)
 const messages = ref([])
 const validationError = ref('')
 const recentChanges = ref([])
-const assistantEngine = ref('local')
-const demoRunning = ref(false)
-
-const engineLabel = computed(() => assistantEngine.value === 'openclaw' ? 'OpenClaw 规划中枢' : '结构化规划服务')
 
 const quickQuestions = [
   '从上海出发，周末两天带孩子慢游杭州，想体验非遗和本地美食，预算3000元',
   '从南京出发去苏州三天，想看园林、博物馆，也想吃本地菜',
   '一个人去成都四天，想避开太赶的打卡路线，看看本地生活',
 ]
-const demoQuestion = quickQuestions[0]
-
 const form = reactive({
   destination: state.request.destination,
   departure: state.request.departure,
@@ -382,7 +368,6 @@ async function sendQuestion(question) {
     const result = await analyzeTravelConversation(question, currentDraft(), history)
     applyDraft(result.draft)
     recentChanges.value = [...(result.changes || [])]
-    assistantEngine.value = result.engine || 'local'
     messages.value.push({
       role: 'ai',
       text: result.reply || '我已经整理了这次需求，请检查右侧出行条件。',
@@ -400,20 +385,6 @@ async function sendQuestion(question) {
   } finally {
     typing.value = false
     scrollChat()
-  }
-}
-
-async function runDemo() {
-  if (demoRunning.value || typing.value || state.isGenerating) return
-  demoRunning.value = true
-  validationError.value = ''
-  try {
-    const result = await sendQuestion(demoQuestion)
-    if (!result?.readyToGenerate) return
-    const plan = await handleSubmit()
-    if (plan) await router.push({ name: 'travel-plan', query: { plan: String(plan.id) } })
-  } finally {
-    demoRunning.value = false
   }
 }
 
@@ -467,10 +438,6 @@ onMounted(() => {
       text: `已经把“${focus}”作为${destination || '这次旅程'}的重点地点，并同步到右侧条件。补充出发地、同行人和预算后即可生成。`,
     })
   }
-  if (route.query.demo === '1') {
-    window.setTimeout(runDemo, 260)
-    return
-  }
   const question = typeof route.query.q === 'string' ? route.query.q.trim() : ''
   if (question) sendQuick(question)
 })
@@ -499,26 +466,6 @@ onMounted(() => {
   backdrop-filter: blur(16px);
 }
 
-.planner-demo-actions {
-  display: grid;
-  justify-items: end;
-  gap: 7px;
-}
-
-.planner-demo-actions button {
-  padding: 7px 12px;
-  border: 1px solid rgba(49, 91, 90, .25);
-  border-radius: 999px;
-  background: rgba(49, 91, 90, .08);
-  color: var(--teal-deep);
-  cursor: pointer;
-  font-family: 'Noto Serif SC', serif;
-  font-size: 10px;
-  letter-spacing: .6px;
-}
-
-.planner-demo-actions button:disabled { cursor: wait; opacity: .55; }
-
 .back-link {
   color: var(--ink-soft);
   font-size: 12px;
@@ -543,23 +490,6 @@ onMounted(() => {
   font-size: clamp(20px, 2.4vw, 30px);
   font-weight: 600;
   letter-spacing: 2px;
-}
-
-.service-state {
-  justify-self: end;
-  color: var(--ink-soft);
-  font-size: 11px;
-  letter-spacing: 1px;
-}
-
-.service-state i {
-  display: inline-block;
-  width: 7px;
-  height: 7px;
-  margin-right: 7px;
-  border-radius: 50%;
-  background: #5d8b70;
-  box-shadow: 0 0 0 4px rgba(93, 139, 112, .12);
 }
 
 .planner-workspace {
@@ -1056,7 +986,6 @@ onMounted(() => {
   .planner-topbar { grid-template-columns: 1fr auto; padding: 14px 16px; }
   .title-group { grid-column: 1 / -1; grid-row: 1; }
   .back-link { grid-column: 1; grid-row: 2; }
-  .service-state { grid-column: 2; grid-row: 2; }
   .planner-workspace { width: calc(100% - 24px); margin-top: 12px; }
   .assistant-panel { min-height: 660px; }
   .panel-heading { padding: 15px; }
@@ -1071,8 +1000,11 @@ onMounted(() => {
 
 /* The planning flow reads like a travel journal instead of a dashboard. */
 .planner-page {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  height: calc(100dvh - 77px);
   min-height: calc(100vh - 77px);
-  padding-bottom: 90px;
+  overflow: hidden;
   background:
     linear-gradient(90deg, rgba(36, 95, 90, .026) 1px, transparent 1px),
     linear-gradient(rgba(36, 95, 90, .02) 1px, transparent 1px),
@@ -1083,26 +1015,25 @@ onMounted(() => {
 
 .planner-topbar {
   display: flex;
-  align-items: end;
-  justify-content: space-between;
-  gap: 56px;
+  align-items: center;
+  justify-content: flex-start;
   width: min(1280px, calc(100% - 72px));
   margin: 0 auto;
-  padding: 72px 0 42px;
+  padding: 12px 0 10px;
   border: 0;
   background: transparent;
   backdrop-filter: none;
 }
 
 .title-group {
-  max-width: 790px;
+  max-width: 900px;
   text-align: left;
 }
 
 .title-group .back-link {
   display: block;
   width: max-content;
-  margin-bottom: 27px;
+  margin-bottom: 7px;
   color: var(--teal-deep);
   font-size: 11px;
   font-weight: 700;
@@ -1117,47 +1048,19 @@ onMounted(() => {
 
 .title-group > span {
   color: var(--terracotta-deep);
-  font-size: 10px;
+  font-size: 9px;
   font-weight: 700;
   letter-spacing: 2.8px;
 }
 
 .title-group h1 {
-  margin: 10px 0 16px;
+  margin: 3px 0 0;
   color: var(--ink);
   font-family: 'Noto Serif SC', 'Songti SC', serif;
-  font-size: clamp(42px, 5.2vw, 72px);
+  font-size: clamp(26px, 2.1vw, 32px);
   font-weight: 600;
-  letter-spacing: -3px;
-  line-height: 1.12;
-}
-
-.title-group > p {
-  max-width: 700px;
-  margin: 0;
-  color: var(--ink-soft);
-  font-size: 14px;
-  line-height: 1.9;
-}
-
-.planner-demo-actions {
-  min-width: 190px;
-  justify-items: start;
-  padding-bottom: 4px;
-}
-
-.planner-demo-actions button {
-  margin-top: 8px;
-  padding: 11px 17px;
-  border-color: rgba(36, 95, 90, .35);
-  border-radius: 2px;
-  background: transparent;
-  font-size: 11px;
-}
-
-.service-state {
-  justify-self: start;
-  font-size: 10px;
+  letter-spacing: -1.5px;
+  line-height: 1.08;
 }
 
 .planner-stage-rail {
@@ -1166,8 +1069,8 @@ onMounted(() => {
   align-items: center;
   gap: 18px;
   width: min(1280px, calc(100% - 72px));
-  margin: 0 auto 36px;
-  padding: 17px 0;
+  margin: 0 auto 13px;
+  padding: 9px 0;
   border-top: 1px solid rgba(44, 36, 27, .14);
   border-bottom: 1px solid rgba(44, 36, 27, .14);
 }
@@ -1199,44 +1102,47 @@ onMounted(() => {
 
 .planner-workspace {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 410px;
-  align-items: start;
-  gap: clamp(32px, 5vw, 72px);
+  grid-template-columns: minmax(0, 1.08fr) minmax(0, .92fr);
+  align-items: stretch;
+  gap: 24px;
   width: min(1280px, calc(100% - 72px));
   height: auto;
   min-height: 0;
   margin: 0 auto;
+  padding-bottom: 18px;
 }
 
 .assistant-panel,
 .conditions-panel {
   min-width: 0;
-  overflow: visible;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-  box-shadow: none;
-  backdrop-filter: none;
+  height: 100%;
+  overflow: hidden;
+  border: 1px solid rgba(44, 36, 27, .1);
+  border-radius: 2px;
+  background: rgba(255, 253, 248, .78);
+  box-shadow: 0 18px 48px rgba(44, 36, 27, .07);
+  backdrop-filter: blur(10px);
 }
 
 .assistant-panel {
-  display: block;
-  padding-top: 3px;
+  display: flex;
+  flex-direction: column;
+  border-top: 4px solid var(--terracotta);
 }
 
 .panel-heading {
   gap: 17px;
-  padding: 0 0 25px;
+  padding: 16px 20px;
   border-bottom: 1px solid rgba(44, 36, 27, .13);
 }
 
 .assistant-mark {
-  width: 52px;
-  height: 58px;
+  width: 44px;
+  height: 48px;
   border-radius: 50% 50% 46% 46%;
   background: var(--teal-deep);
-  font-size: 24px;
-  box-shadow: 5px 5px 0 rgba(193, 101, 70, .45);
+  font-size: 21px;
+  box-shadow: 4px 4px 0 rgba(193, 101, 70, .4);
 }
 
 .panel-heading span {
@@ -1249,24 +1155,29 @@ onMounted(() => {
 
 .panel-heading h2 {
   margin: 4px 0 3px;
-  font-size: 23px;
+  font-size: 20px;
 }
 
 .panel-heading p {
-  font-size: 12px;
+  font-size: 11px;
 }
 
 .chat-stream {
   display: flex;
-  min-height: 430px;
-  padding: 34px 0 22px;
-  overflow: visible;
+  min-height: 0;
+  flex: 1;
+  padding: 18px;
+  overflow-y: auto;
 }
 
 .welcome-card {
-  max-width: 720px;
+  display: flex;
+  max-width: none;
+  min-height: 100%;
   margin: 0;
-  padding: 45px clamp(24px, 5vw, 58px);
+  padding: 28px clamp(24px, 3.5vw, 42px);
+  flex-direction: column;
+  justify-content: center;
   border: 0;
   border-left: 4px solid var(--terracotta);
   border-radius: 0;
@@ -1285,7 +1196,7 @@ onMounted(() => {
 .welcome-card h3 {
   max-width: 540px;
   margin: 14px 0 13px;
-  font-size: clamp(30px, 3.4vw, 44px);
+  font-size: clamp(27px, 2.5vw, 36px);
   line-height: 1.35;
 }
 
@@ -1297,12 +1208,12 @@ onMounted(() => {
 .quick-questions {
   display: grid;
   justify-content: stretch;
-  gap: 9px;
-  margin-top: 28px;
+  gap: 4px;
+  margin-top: 17px;
 }
 
 .quick-questions button {
-  padding: 11px 0;
+  padding: 8px 0;
   border: 0;
   border-bottom: 1px solid rgba(36, 95, 90, .16);
   border-radius: 0;
@@ -1341,11 +1252,10 @@ onMounted(() => {
 }
 
 .chat-composer {
-  position: sticky;
-  bottom: 18px;
+  position: static;
   z-index: 4;
-  margin: 0;
-  padding: 16px 18px 12px;
+  margin: 0 18px 18px;
+  padding: 12px 14px 10px;
   border: 1px solid rgba(44, 36, 27, .18);
   border-radius: 2px;
   background: rgba(255, 253, 248, .96);
@@ -1354,8 +1264,8 @@ onMounted(() => {
 }
 
 .chat-composer textarea {
-  min-height: 58px;
-  font-size: 14px;
+  min-height: 46px;
+  font-size: 13px;
 }
 
 .chat-composer button {
@@ -1367,10 +1277,10 @@ onMounted(() => {
 }
 
 .conditions-panel {
-  position: sticky;
-  top: 96px;
+  position: static;
   max-height: none;
-  padding: 29px 30px 30px;
+  padding: 21px 24px 22px;
+  overflow-y: auto;
   border-top: 4px solid var(--teal-deep);
   background: rgba(255, 253, 248, .88);
   box-shadow: 0 22px 60px rgba(44, 36, 27, .08);
@@ -1378,12 +1288,12 @@ onMounted(() => {
 
 .conditions-heading {
   align-items: start;
-  margin-bottom: 23px;
+  margin-bottom: 15px;
 }
 
 .conditions-heading h2 {
   margin-top: 6px;
-  font-size: 25px;
+  font-size: 22px;
 }
 
 .conditions-heading > div > span {
@@ -1391,13 +1301,13 @@ onMounted(() => {
 }
 
 .conditions-form {
-  gap: 19px;
+  gap: 13px;
 }
 
 .form-row label > span,
 .conditions-form .notes-field > span,
 .conditions-form legend {
-  margin-bottom: 7px;
+  margin-bottom: 5px;
   color: var(--ink);
   font-size: 11px;
   font-weight: 700;
@@ -1405,7 +1315,7 @@ onMounted(() => {
 
 .conditions-form input,
 .conditions-form select {
-  padding: 11px 0;
+  padding: 8px 0;
   border: 0;
   border-bottom: 1px solid rgba(44, 36, 27, .24);
   border-radius: 0;
@@ -1448,7 +1358,7 @@ onMounted(() => {
   align-items: baseline;
   gap: 8px;
   margin: 2px 0 7px;
-  padding: 10px 13px 8px;
+  padding: 8px 11px 7px;
   border: 1px solid rgba(36, 95, 90, .22);
   background: rgba(247, 242, 233, .58);
 }
@@ -1467,7 +1377,7 @@ onMounted(() => {
   border: 0;
   color: var(--ink);
   font-family: Georgia, 'Noto Serif SC', serif;
-  font-size: 25px;
+  font-size: 22px;
   font-weight: 700;
 }
 
@@ -1478,7 +1388,7 @@ onMounted(() => {
 
 .input-hint {
   display: block;
-  margin: 0 0 10px;
+  margin: 0 0 6px;
   color: var(--ink-soft);
   font-size: 9px;
   line-height: 1.5;
@@ -1571,15 +1481,15 @@ onMounted(() => {
 }
 
 .conditions-form .notes-field textarea {
-  min-height: 62px;
-  padding: 10px 11px;
+  min-height: 50px;
+  padding: 8px 10px;
   border: 1px solid rgba(44, 36, 27, .16);
   background: rgba(247, 242, 233, .64);
   font-size: 12px;
 }
 
 .chip-list button {
-  padding: 8px 11px;
+  padding: 6px 9px;
   border-radius: 2px;
   background: transparent;
   font-size: 11px;
@@ -1592,7 +1502,7 @@ onMounted(() => {
 }
 
 .generate-button {
-  min-height: 51px;
+  min-height: 44px;
   padding: 0 18px;
   border-radius: 2px;
   box-shadow: 4px 4px 0 rgba(36, 95, 90, .55);
@@ -1607,6 +1517,14 @@ onMounted(() => {
 }
 
 @media (max-width: 1050px) {
+  .planner-page {
+    display: block;
+    height: auto;
+    min-height: calc(100vh - 77px);
+    padding-bottom: 40px;
+    overflow: visible;
+  }
+
   .planner-topbar,
   .planner-stage-rail,
   .planner-workspace {
@@ -1623,10 +1541,21 @@ onMounted(() => {
     padding-bottom: 0;
   }
 
-  .assistant-panel {
-    min-height: 0;
+  .assistant-panel,
+  .conditions-panel {
+    height: auto;
+    overflow: visible;
     border-radius: 0;
   }
+
+  .assistant-panel { min-height: 620px; }
+
+  .chat-stream {
+    min-height: 430px;
+    overflow: visible;
+  }
+
+  .welcome-card { min-height: 0; }
 
   .conditions-panel {
     position: static;
@@ -1641,10 +1570,7 @@ onMounted(() => {
   .planner-workspace { width: calc(100% - 28px); }
   .planner-topbar { display: grid; gap: 23px; padding: 35px 0 28px; }
   .title-group { grid-column: auto; grid-row: auto; }
-  .title-group h1 { font-size: 40px; letter-spacing: -2px; }
-  .title-group > p { font-size: 12px; }
-  .planner-demo-actions { display: flex; align-items: center; justify-content: space-between; }
-  .planner-demo-actions button { margin-top: 0; }
+  .title-group h1 { font-size: 28px; letter-spacing: -1.5px; }
   .planner-stage-rail { gap: 7px; margin-bottom: 25px; }
   .planner-stage-rail span { font-size: 10px; letter-spacing: 0; }
   .planner-stage-rail span b { display: none; }

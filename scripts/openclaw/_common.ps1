@@ -194,7 +194,19 @@ function Get-RecordedRuntimeProcess {
         return $null
     }
 
-    $recordedStart = [DateTime]::Parse($record.startedAt).ToUniversalTime()
+    $recordedStart = if ($record.startedAt -is [DateTime]) {
+        # PowerShell 7 deserializes the trailing-Z JSON value as Unspecified on Windows.
+        if ($record.startedAt.Kind -eq [DateTimeKind]::Unspecified) {
+            [DateTime]::SpecifyKind($record.startedAt, [DateTimeKind]::Utc)
+        } else {
+            $record.startedAt.ToUniversalTime()
+        }
+    } else {
+        [DateTimeOffset]::Parse(
+            [string]$record.startedAt,
+            [Globalization.CultureInfo]::InvariantCulture
+        ).UtcDateTime
+    }
     $actualStart = $process.StartTime.ToUniversalTime()
     if ([Math]::Abs(($recordedStart - $actualStart).TotalSeconds) -gt 2) {
         return $null

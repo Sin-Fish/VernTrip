@@ -31,3 +31,33 @@ export function updateMerchantResourceStatus(resourceId, status) {
     jsonRequest('PATCH', { status }),
   )
 }
+
+export function getMerchantDashboard() {
+  return userRequest('/api/merchant/dashboard')
+}
+
+export function listMerchantProducts() {
+  return userRequest('/api/merchant/products')
+}
+
+export function createMerchantProduct(product) {
+  return userRequest('/api/merchant/products', jsonRequest('POST', product))
+}
+
+export function updateMerchantProduct(productId, product) {
+  return userRequest(
+    `/api/merchant/products/${productId}`,
+    jsonRequest('PUT', product),
+  )
+}
+
+export function updateMerchantProductStatus(productId, status) {
+  return userRequest(
+    `/api/merchant/products/${productId}/status`,
+    jsonRequest('PATCH', { status }),
+  )
+}
+
+export function generateMerchantContent(request) {
+  return userRequest('/api/merchant/content/generate', jsonRequest('POST', request))
+}

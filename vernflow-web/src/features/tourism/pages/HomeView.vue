@@ -13,10 +13,6 @@
           <HeroSection @explore="showExplore" />
         </div>
         <FeatureStrip class="feature-strip" />
-        <button class="scene-switch" type="button" @click.stop="showExplore">
-          <span>点击画面 · 看旅行灵感</span>
-          <i aria-hidden="true"></i>
-        </button>
       </section>
 
       <section v-else key="explore" ref="explorePanel" class="scene-panel inspiration-scene">
@@ -28,7 +24,6 @@
           <div>
             <span class="eyebrow">TRAVEL INSPIRATION</span>
             <h2>从一处风景，开始想象旅程</h2>
-            <p>浏览当季路线与地方体验，找到喜欢的方向后交给 AI 继续规划。</p>
           </div>
           <RouterLink class="planner-link" :to="{ name: 'travel-planner' }">开始规划</RouterLink>
         </header>
@@ -168,30 +163,6 @@ onMounted(() => {
   cursor: default;
 }
 
-.scene-switch {
-  position: absolute;
-  right: 46px;
-  bottom: 118px;
-  z-index: 4;
-  display: grid;
-  justify-items: center;
-  gap: 8px;
-  border: 0;
-  background: transparent;
-  color: rgba(44, 36, 27, .72);
-  cursor: pointer;
-  font-family: 'Noto Serif SC', serif;
-  font-size: 11px;
-  letter-spacing: 2px;
-}
-
-.scene-switch i {
-  width: 1px;
-  height: 34px;
-  background: linear-gradient(var(--teal), transparent);
-  animation: guide-pulse 1.8s ease-in-out infinite;
-}
-
 .inspiration-scene {
   overflow-x: hidden;
   overflow-y: auto;
@@ -248,12 +219,6 @@ onMounted(() => {
   letter-spacing: 3px;
 }
 
-.inspiration-heading p {
-  color: var(--ink-soft);
-  font-size: 12px;
-  letter-spacing: .6px;
-}
-
 .return-button,
 .planner-link {
   justify-self: start;
@@ -305,15 +270,9 @@ onMounted(() => {
   to { opacity: 1; transform: scale(1); }
 }
 
-@keyframes guide-pulse {
-  0%, 100% { opacity: .35; transform: scaleY(.72); transform-origin: top; }
-  50% { opacity: 1; transform: scaleY(1); transform-origin: top; }
-}
-
 @media (max-width: 900px) {
   .home-stage { height: calc(100vh - 72px); min-height: 680px; }
   .hero-overlay { padding: 34px 24px 24px; }
-  .scene-switch { right: 20px; bottom: 116px; }
   .inspiration-bg { top: 72px; height: calc(100vh - 72px); }
   .inspiration-wash { inset: 72px 0 0; }
   .inspiration-heading { grid-template-columns: 1fr auto; width: calc(100% - 32px); }
@@ -326,10 +285,7 @@ onMounted(() => {
 @media (max-width: 640px) {
   .home-stage { min-height: 720px; }
   .hero-wash { background: rgba(239, 233, 218, .57); }
-  .scene-switch { bottom: 102px; }
-  .scene-switch span { display: none; }
   .inspiration-heading { padding-top: 22px; }
   .inspiration-heading h2 { font-size: 24px; letter-spacing: 1px; }
-  .inspiration-heading p { display: none; }
 }
 </style>

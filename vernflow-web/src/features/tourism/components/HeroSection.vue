@@ -6,10 +6,6 @@
       让 <em>AI</em><br />读懂你的山水。
     </h1>
 
-    <p class="hero-sub">
-      告诉我们此刻的心情、时间与偏好，先从一句话开始规划一段值得抵达的旅程。
-    </p>
-
     <div class="ai-entry">
       <div class="ai-input-wrap">
         <span class="ai-dot"></span>
@@ -22,14 +18,6 @@
         />
         <span class="enter-hint">按 Enter 开始</span>
       </div>
-      <p class="ai-hint">AI 会结合你的描述完善出行条件，并生成可调整的旅行方案。</p>
-
-      <button class="demo-cta" type="button" @click="startDemo">
-        <span>一键体验完整演示</span>
-        <small>OpenClaw 识别需求 · 生成两日行程</small>
-        <b>→</b>
-      </button>
-
       <button class="ai-explore-link" type="button" @click="emit('explore')">
         还没想好？先看旅行灵感 <span class="explore-arrow">→</span>
       </button>
@@ -72,9 +60,6 @@ function handleSearch() {
   router.push({ name: 'travel-planner', query: { q } })
 }
 
-function startDemo() {
-  router.push({ name: 'travel-planner', query: { demo: '1' } })
-}
 </script>
 
 <style scoped>
@@ -109,17 +94,6 @@ function startDemo() {
 .hero-title em {
   color: var(--cinnabar);
   font-style: normal;
-}
-
-.hero-sub {
-  max-width: 480px;
-  margin-bottom: 28px;
-  color: var(--ink);
-  font-family: 'Noto Serif SC', serif;
-  font-size: 15px;
-  font-weight: 300;
-  letter-spacing: .5px;
-  line-height: 1.8;
 }
 
 .ai-entry {
@@ -179,39 +153,6 @@ function startDemo() {
   letter-spacing: 1px;
 }
 
-.ai-hint {
-  margin-top: 10px;
-  padding-left: 2px;
-  color: var(--ink-soft);
-  font-family: 'Noto Serif SC', serif;
-  font-size: 12px;
-  font-weight: 300;
-  letter-spacing: .5px;
-}
-
-.demo-cta {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  align-items: center;
-  width: 100%;
-  margin-top: 15px;
-  padding: 13px 16px;
-  border: 1px solid rgba(49, 91, 90, .22);
-  border-radius: 12px;
-  background: linear-gradient(110deg, rgba(49, 91, 90, .92), rgba(62, 104, 91, .84));
-  color: #fffaf0;
-  cursor: pointer;
-  font-family: 'Noto Serif SC', serif;
-  text-align: left;
-  box-shadow: 0 12px 28px rgba(49, 91, 90, .15);
-  transition: transform .25s ease, box-shadow .25s ease;
-}
-
-.demo-cta:hover { transform: translateY(-2px); box-shadow: 0 16px 34px rgba(49, 91, 90, .22); }
-.demo-cta span { font-size: 14px; letter-spacing: 1px; }
-.demo-cta small { grid-column: 1; margin-top: 3px; color: rgba(255, 250, 240, .65); font-size: 9px; letter-spacing: .6px; }
-.demo-cta b { grid-column: 2; grid-row: 1 / 3; font-size: 20px; font-weight: 400; }
-
 .ai-explore-link {
   display: inline-block;
   margin: 13px 0 2px;
@@ -264,7 +205,6 @@ function startDemo() {
   .hero-content { padding: 8px 0; }
   .hero-tag { margin-bottom: 18px; }
   .hero-title { font-size: clamp(38px, 12vw, 52px); }
-  .hero-sub { margin-bottom: 22px; font-size: 14px; }
   .enter-hint { display: none; }
   .quick-tag { padding: 6px 12px; }
 }

@@ -5,11 +5,13 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.vernflow.common.exception.BusinessException;
 import com.vernflow.modules.tourism.domain.TourismPlace;
+import com.vernflow.modules.tourism.domain.TourismProduct;
 import com.vernflow.modules.tourism.domain.TourismResource;
 import com.vernflow.modules.tourism.dto.MerchantResourceCreateRequest;
 import com.vernflow.modules.tourism.dto.MerchantResourceResponse;
 import com.vernflow.modules.tourism.dto.MerchantResourceUpdateRequest;
 import com.vernflow.modules.tourism.repository.TourismPlaceRepository;
+import com.vernflow.modules.tourism.repository.TourismProductRepository;
 import com.vernflow.modules.tourism.repository.TourismResourceRepository;
 
 import org.springframework.stereotype.Service;
@@ -27,15 +29,18 @@ public class MerchantResourceService {
 
     private final TourismResourceRepository tourismResourceRepository;
     private final TourismPlaceRepository tourismPlaceRepository;
+    private final TourismProductRepository tourismProductRepository;
     private final ObjectMapper objectMapper;
 
     public MerchantResourceService(
             TourismResourceRepository tourismResourceRepository,
             TourismPlaceRepository tourismPlaceRepository,
+            TourismProductRepository tourismProductRepository,
             ObjectMapper objectMapper
     ) {
         this.tourismResourceRepository = tourismResourceRepository;
         this.tourismPlaceRepository = tourismPlaceRepository;
+        this.tourismProductRepository = tourismProductRepository;
         this.objectMapper = objectMapper;
     }
 
@@ -101,6 +106,7 @@ public class MerchantResourceService {
                 operating.dailyCapacity(),
                 operating.availableCapacity()
         );
+        deactivateProductsWhenUnavailable(resource);
         return toResponse(tourismResourceRepository.save(resource));
     }
 
@@ -150,7 +156,20 @@ public class MerchantResourceService {
             throw new BusinessException("资源完整度不足，暂时不能上线。请先补充简介、标签和来源信息。");
         }
         resource.changeStatus(status);
+        deactivateProductsWhenUnavailable(resource);
         return toResponse(tourismResourceRepository.save(resource));
+    }
+
+    private void deactivateProductsWhenUnavailable(TourismResource resource) {
+        if (resource.isAvailableForPlanning()) {
+            return;
+        }
+        List<TourismProduct> affectedProducts = tourismProductRepository.findAllByResourcesIdAndStatus(
+                resource.getId(),
+                TourismProduct.Status.PUBLISHED
+        );
+        affectedProducts.forEach(product -> product.changeStatus(TourismProduct.Status.INACTIVE));
+        tourismProductRepository.saveAll(affectedProducts);
     }
 
     private MerchantResourceResponse toResponse(TourismResource resource) {
