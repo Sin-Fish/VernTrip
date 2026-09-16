@@ -110,6 +110,37 @@ public class MerchantResourceService {
         return toResponse(tourismResourceRepository.save(resource));
     }
 
+    public int previewQualityScore(
+            MerchantResourceCreateRequest request,
+            String summary,
+            List<String> tags
+    ) {
+        int score = 45;
+        if (StringUtils.hasText(summary)) {
+            score += 15;
+        }
+        if (tags != null && tags.stream().anyMatch(StringUtils::hasText)) {
+            score += 10;
+        }
+        if (StringUtils.hasText(request.district())) {
+            score += 5;
+        }
+        score += 5;
+        if (StringUtils.hasText(request.amapPoiId())
+                && request.longitude() != null
+                && request.latitude() != null) {
+            score += 10;
+        }
+        if (StringUtils.hasText(request.openHours())) {
+            score += 8;
+        }
+        BigDecimal maximumPrice = request.priceMax() == null ? request.priceMin() : request.priceMax();
+        if (maximumPrice != null && maximumPrice.signum() > 0) {
+            score += 5;
+        }
+        return Math.min(score, 100);
+    }
+
     @Transactional
     public MerchantResourceResponse updateResource(Long resourceId, MerchantResourceUpdateRequest request) {
         TourismResource resource = tourismResourceRepository.findById(resourceId)

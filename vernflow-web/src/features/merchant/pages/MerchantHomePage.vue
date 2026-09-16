@@ -3,6 +3,7 @@ import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useUserAuth } from '@/composables/useUserAuth'
 import {
+  auditMerchantResource,
   createMerchantProduct,
   createMerchantResource,
   generateMerchantContent,
@@ -42,6 +43,10 @@ const updatingProductId = ref(null)
 const poiSearching = ref(false)
 const poiResults = ref([])
 const poiSearchError = ref('')
+const resourceAuditing = ref(false)
+const resourceAudit = ref(null)
+const resourceAuditSignature = ref('')
+const publishAfterCreate = ref(true)
 
 const sectionTitles = {
   overview: '经营总览',
@@ -91,6 +96,25 @@ const audienceSegments = computed(() => dashboard.value?.audienceSegments ?? [])
 const resourceCitations = computed(() => dashboard.value?.resourceCitations ?? [])
 const topInterest = computed(() => trends.value[0]?.label ?? '暂无数据')
 const topAudience = computed(() => audienceSegments.value[0]?.label ?? '暂无数据')
+const maxTrendCount = computed(() => Math.max(1, ...trends.value.map((item) => Number(item.count) || 0)))
+const maxCitationCount = computed(() => Math.max(1, ...resourceCitations.value.map((item) => Number(item.count) || 0)))
+const topInterestShare = computed(() => Number(trends.value[0]?.share ?? 0))
+const audiencePalette = ['#d1785e', '#d7bd8c', '#86a092', '#a9b7ad', '#efe4ce', '#7b9388']
+const audienceLegend = computed(() => audienceSegments.value.slice(0, 6).map((segment, index) => ({
+  ...segment,
+  color: audiencePalette[index % audiencePalette.length],
+})))
+const audienceDonutStyle = computed(() => {
+  if (!audienceLegend.value.length) return { background: 'rgba(255, 255, 255, .08)' }
+  let cursor = 0
+  const stops = audienceLegend.value.map((segment) => {
+    const start = cursor
+    cursor = Math.min(100, cursor + Number(segment.share || 0))
+    return `${segment.color} ${start}% ${cursor}%`
+  })
+  if (cursor < 100) stops.push(`rgba(255, 255, 255, .1) ${cursor}% 100%`)
+  return { background: `conic-gradient(${stops.join(', ')})` }
+})
 const contentSources = computed(() => (contentForm.sourceType === 'PRODUCT'
   ? products.value.map((product) => ({ id: product.id, label: product.name }))
   : resources.value.map((resource) => ({ id: resource.id, label: resource.name }))))
@@ -107,6 +131,7 @@ const contentFacts = ref([])
 const contentEngine = ref('')
 const contentGeneratedAt = ref('')
 const newResource = reactive({
+  city: '杭州',
   name: '',
   category: 'EXPERIENCE',
   district: '拱墅区',
@@ -117,7 +142,7 @@ const newResource = reactive({
   longitude: null,
   latitude: null,
   summary: '',
-  tags: '非遗体验、需预约',
+  tags: '',
   openHours: '09:00-17:00',
   priceMin: 0,
   priceMax: 0,
@@ -176,6 +201,13 @@ const categoryOptions = [
   { value: 'SCENIC', label: '自然景观' },
   { value: 'LODGING', label: '住宿' },
 ]
+
+const selectedCategoryLabel = computed(() => (
+  categoryOptions.find((option) => option.value === newResource.category)?.label ?? '文旅体验'
+))
+const resourceAuditStale = computed(() => Boolean(
+  resourceAudit.value && resourceAuditSignature.value !== resourceDraftSignature()
+))
 
 watch(contentSources, (sources) => {
   if (!sources.some((source) => source.id === contentForm.sourceId)) {
@@ -256,6 +288,8 @@ function openNewResourceModal() {
   resourceModalOpen.value = true
   poiResults.value = []
   poiSearchError.value = ''
+  resourceAudit.value = null
+  resourceAuditSignature.value = ''
 }
 
 function openResourceEditor(resource) {
@@ -288,7 +322,7 @@ async function searchResourcePoi() {
     const AMap = await loadAmap()
     poiResults.value = await searchAmapPois(AMap, {
       keyword: newResource.placeQuery,
-      city: '杭州',
+      city: newResource.city.trim() || '杭州',
       pageSize: 6,
     })
     if (!poiResults.value.length) {
@@ -309,8 +343,94 @@ function selectResourcePoi(poi) {
   newResource.longitude = poi.longitude
   newResource.latitude = poi.latitude
   if (poi.district) newResource.district = poi.district
+  if (!newResource.name.trim()) newResource.name = poi.name
   poiResults.value = []
   poiSearchError.value = ''
+  resourceAudit.value = null
+  resourceAuditSignature.value = ''
+}
+
+function resourcePayload() {
+  return {
+    city: newResource.city.trim(),
+    name: newResource.name.trim(),
+    category: newResource.category,
+    district: newResource.district.trim(),
+    placeName: newResource.placeName,
+    amapPoiId: newResource.amapPoiId,
+    address: newResource.address,
+    longitude: newResource.longitude,
+    latitude: newResource.latitude,
+    summary: newResource.summary.trim(),
+    tags: newResource.tags.split(/[、,，]/).map((tag) => tag.trim()).filter(Boolean),
+    ...operatingPayload(newResource),
+  }
+}
+
+function resourceDraftSignature() {
+  return JSON.stringify(resourcePayload())
+}
+
+function validateNewResource() {
+  if (!newResource.city.trim() || !newResource.name.trim()) {
+    showToast('请先填写经营城市和资源名称')
+    return false
+  }
+  if (!newResource.amapPoiId) {
+    showToast('请先从高德搜索结果中选择真实地点')
+    return false
+  }
+  return validateOperatingForm(newResource)
+}
+
+async function auditResourceDraft() {
+  if (!validateNewResource()) return
+  resourceAuditing.value = true
+  resourceAudit.value = null
+  try {
+    const signature = resourceDraftSignature()
+    resourceAudit.value = await auditMerchantResource(resourcePayload())
+    resourceAuditSignature.value = signature
+    showToast(resourceAudit.value.engine === 'OPENCLAW' ? '智能审核完成' : '规则预检完成')
+  } catch (error) {
+    showToast(error.message || '资源智能审核失败')
+  } finally {
+    resourceAuditing.value = false
+  }
+}
+
+function applyResourceAudit() {
+  if (!resourceAudit.value || resourceAuditStale.value) return
+  newResource.summary = resourceAudit.value.generatedSummary
+  newResource.tags = (resourceAudit.value.generatedTags ?? []).join('、')
+  resourceAuditSignature.value = resourceDraftSignature()
+  showToast('内容已应用')
+}
+
+function resetNewResourceForm() {
+  Object.assign(newResource, {
+    city: '杭州',
+    name: '',
+    category: 'EXPERIENCE',
+    district: '拱墅区',
+    placeQuery: '',
+    placeName: '',
+    amapPoiId: '',
+    address: '',
+    longitude: null,
+    latitude: null,
+    summary: '',
+    tags: '',
+    openHours: '09:00-17:00',
+    priceMin: 0,
+    priceMax: 0,
+    reservationRequired: true,
+    dailyCapacity: 30,
+    availableCapacity: 18,
+  })
+  resourceAudit.value = null
+  resourceAuditSignature.value = ''
+  poiResults.value = []
 }
 
 async function loadResources() {
@@ -375,7 +495,7 @@ async function generateContent() {
     contentFacts.value = result.facts ?? []
     contentEngine.value = result.engine
     contentGeneratedAt.value = result.generatedAt
-    showToast('OpenClaw 文案已生成，请人工确认后使用')
+    showToast('文案已生成')
   } catch (error) {
     showToast(error.message || '营销内容生成失败')
   } finally {
@@ -492,51 +612,32 @@ function handleTask(task) {
 }
 
 async function addResource() {
-  if (!newResource.name.trim()) {
-    showToast('请先填写资源名称')
+  if (!validateNewResource()) return
+  if (!resourceAudit.value || resourceAuditStale.value) {
+    showToast('请先完成一次最新的智能审核')
     return
   }
-  if (!newResource.amapPoiId) {
-    showToast('请先从高德搜索结果中选择真实地点')
-    return
-  }
-  if (!validateOperatingForm(newResource)) return
   resourceSaving.value = true
   try {
-    const created = await createMerchantResource({
-      city: '杭州',
-      name: newResource.name.trim(),
-      category: newResource.category,
-      district: newResource.district,
-      placeName: newResource.placeName,
-      amapPoiId: newResource.amapPoiId,
-      address: newResource.address,
-      longitude: newResource.longitude,
-      latitude: newResource.latitude,
-      summary: newResource.summary.trim(),
-      tags: newResource.tags.split(/[、,，]/).map((tag) => tag.trim()).filter(Boolean),
-      ...operatingPayload(newResource),
-    })
-    resources.value.unshift(toViewResource(created))
-    newResource.name = ''
-    newResource.placeQuery = ''
-    newResource.placeName = ''
-    newResource.amapPoiId = ''
-    newResource.address = ''
-    newResource.longitude = null
-    newResource.latitude = null
-    newResource.summary = ''
-    newResource.openHours = '09:00-17:00'
-    newResource.priceMin = 0
-    newResource.priceMax = 0
-    newResource.reservationRequired = true
-    newResource.dailyCapacity = 30
-    newResource.availableCapacity = 18
-    poiResults.value = []
+    applyResourceAudit()
+    let saved = await createMerchantResource(resourcePayload())
+    let published = false
+    if (publishAfterCreate.value
+        && saved.qualityScore >= 70
+        && saved.availabilityStatus !== 'SOLD_OUT') {
+      try {
+        saved = await updateMerchantResourceStatus(saved.id, 'PUBLISHED')
+        published = true
+      } catch (error) {
+        showToast(error.message || '资源已创建，但自动发布失败')
+      }
+    }
+    resources.value.unshift(toViewResource(saved))
+    resetNewResourceForm()
     resourceModalOpen.value = false
     activeSection.value = 'resources'
     await loadDashboard()
-    showToast('资源已写入数据库，完善后即可上线')
+    showToast(published ? '资源已上线' : '资源草稿已保存')
   } catch (error) {
     showToast(error.message || '资源创建失败')
   } finally {
@@ -563,9 +664,7 @@ async function saveResource() {
     if (index >= 0) resources.value.splice(index, 1, updated)
     resourceEditorOpen.value = false
     await Promise.all([loadDashboard(), loadProducts()])
-    showToast(updated.availabilityStatus === 'SOLD_OUT'
-      ? '资源已保存；因当前约满，已退出游客推荐池'
-      : '资源已保存，OpenClaw 推荐目录已同步')
+    showToast(updated.availabilityStatus === 'SOLD_OUT' ? '资源已保存，当前已约满' : '资源信息已保存')
   } catch (error) {
     showToast(error.message || '资源保存失败')
   } finally {
@@ -583,7 +682,7 @@ async function toggleResourceStatus(resource) {
       resources.value.splice(index, 1, updated)
     }
     await Promise.all([loadDashboard(), loadProducts()])
-    showToast(targetStatus === 'PUBLISHED' ? '资源已上线并进入游客推荐池' : '资源已下线')
+    showToast(targetStatus === 'PUBLISHED' ? '资源已上线' : '资源已下线')
   } catch (error) {
     showToast(error.message || '资源状态更新失败')
   } finally {
@@ -610,7 +709,7 @@ onMounted(async () => {
   <main class="merchant-app">
     <aside class="merchant-sidebar">
       <RouterLink class="merchant-brand" :to="{ name: 'merchant-home' }">
-        <span>V</span>
+        <span>山</span>
         <div><strong>山水灵</strong><small>商家工作台</small></div>
       </RouterLink>
 
@@ -632,7 +731,7 @@ onMounted(async () => {
     <section class="merchant-main">
       <header class="merchant-topbar">
         <div>
-          <span>VERNTRIP MERCHANT CONSOLE</span>
+          <span>MERCHANT OPERATIONS / OPENCLAW</span>
           <h1>{{ sectionTitles[activeSection] }}</h1>
         </div>
         <div class="topbar-actions">
@@ -643,10 +742,14 @@ onMounted(async () => {
 
       <div v-if="activeSection === 'overview'" class="dashboard-content">
         <section class="merchant-welcome">
-          <div>
-            <span>{{ todayLabel }} · 杭州</span>
-            <h2>上午好，先把最影响游客体验的事处理好。</h2>
-            <p>系统汇总了资源完整度、游客咨询和近期需要校验的信息，帮助经营人员明确今天的优先事项。</p>
+          <div class="welcome-copy">
+            <span>{{ todayLabel }} · 杭州经营站</span>
+            <h2>今日经营简报</h2>
+            <div class="welcome-pulse">
+              <button type="button" @click="activeSection = 'resources'"><strong>{{ recommendableCount }}</strong><small>项资源可推荐</small></button>
+              <button type="button" @click="activeSection = 'resources'"><strong>{{ tasks.length }}</strong><small>项信息待处理</small></button>
+              <button type="button" @click="activeSection = 'products'"><strong>{{ topInterest }}</strong><small>近期游客偏好</small></button>
+            </div>
           </div>
           <div class="quality-ring">
             <strong>{{ qualityScore }}<small>%</small></strong>
@@ -659,10 +762,10 @@ onMounted(async () => {
           <button type="button" @click="loadDashboard">重新加载</button>
         </div>
         <section class="metric-grid">
-          <article><span>有效文旅资源</span><strong>{{ resources.length }}</strong><small>其中 {{ publishedCount }} 项已进入推荐池</small></article>
-          <article><span>近 7 日方案生成</span><strong>{{ dashboardLoading ? '—' : dashboard?.plansLast7Days ?? 0 }}</strong><small>来自游客端真实规划记录</small></article>
-          <article><span>已发布旅游产品</span><strong>{{ dashboardLoading ? '—' : dashboard?.publishedProductCount ?? 0 }}</strong><small>共 {{ dashboard?.productCount ?? products.length }} 份产品草稿与成品</small></article>
-          <article><span>近 30 日兴趣主题</span><strong>{{ topInterest }}</strong><small>{{ dashboard?.requestsLast30Days ?? 0 }} 份匿名化出行需求</small></article>
+          <article><span>文旅资源</span><strong>{{ resources.length }}</strong><small>{{ publishedCount }} 项已上线</small></article>
+          <article><span>方案生成</span><strong>{{ dashboardLoading ? '—' : dashboard?.plansLast7Days ?? 0 }}</strong><small>近 7 日</small></article>
+          <article><span>旅游产品</span><strong>{{ dashboardLoading ? '—' : dashboard?.publishedProductCount ?? 0 }}</strong><small>已发布</small></article>
+          <article><span>兴趣主题</span><strong>{{ topInterest }}</strong><small>近 30 日</small></article>
         </section>
 
         <div class="dashboard-grid">
@@ -681,22 +784,17 @@ onMounted(async () => {
             <div class="section-title"><div><span>TODAY'S FOCUS</span><h3>今日待办</h3></div><em>{{ tasks.length }} 项</em></div>
             <article v-for="(task, index) in tasks" :key="`${task.type}-${task.resourceId ?? index}`" :class="{ actionable: task.resourceId }" @click="handleTask(task)">
               <span>0{{ index + 1 }}</span>
-              <div><strong>{{ task.title }}</strong><small>{{ task.detail }}</small></div>
+              <div><strong>{{ task.title }}</strong></div>
               <em>{{ task.level }}</em>
             </article>
           </section>
         </div>
 
-        <section class="insight-strip">
-          <span>AI 经营提示</span>
-          <p>{{ dashboard?.operationAdvice || '正在汇总资源状态与游客需求…' }}</p>
-          <button type="button" @click="activeSection = trends.length ? 'products' : 'resources'">去处理建议 →</button>
-        </section>
       </div>
 
       <section v-else-if="activeSection === 'resources'" class="module-content resources-module">
         <div class="module-intro">
-          <div><span>RESOURCE LIBRARY</span><h2>让每条资源都可被 AI 准确理解</h2><p>统一维护开放状态、服务标签和来源信息，决定资源是否进入游客推荐池。</p></div>
+          <div><span>RESOURCE LIBRARY</span><h2>文旅资源</h2></div>
           <div class="module-stat"><strong>{{ recommendableCount }}/{{ publishedCount }}</strong><small>可推荐 / 已上线</small></div>
         </div>
         <div class="module-toolbar">
@@ -737,7 +835,7 @@ onMounted(async () => {
             </div>
           </article>
           <div v-if="!resourceLoading && !resourceError && !filteredResources.length" class="module-empty">
-            <strong>没有符合条件的资源</strong><span>调整筛选或搜索关键词后再试。</span>
+            <strong>没有符合条件的资源</strong>
           </div>
         </div>
         <div v-if="filteredResources.length" class="resource-pagination">
@@ -752,7 +850,7 @@ onMounted(async () => {
 
       <section v-else-if="activeSection === 'products'" class="module-content">
         <div class="module-intro">
-          <div><span>TOURISM PRODUCTS</span><h2>把分散资源组合成主题体验</h2><p>产品发布前会检查所有关联资源的上线与预约状态，避免向游客提供失效组合。</p></div>
+          <div><span>TOURISM PRODUCTS</span><h2>旅游产品</h2></div>
           <button class="primary-module-action" type="button" @click="openNewProductModal">创建新产品</button>
         </div>
         <div v-if="productLoading" class="resource-feedback">正在读取旅游产品...</div>
@@ -770,11 +868,11 @@ onMounted(async () => {
             </footer>
           </article>
         </div>
-        <div v-else class="module-empty product-empty"><strong>还没有旅游产品</strong><span>从两项以上已上线资源开始组合第一份产品。</span><button type="button" @click="openNewProductModal">创建产品草稿</button></div>
+        <div v-else class="module-empty product-empty"><strong>还没有旅游产品</strong><button type="button" @click="openNewProductModal">创建产品草稿</button></div>
       </section>
 
       <section v-else-if="activeSection === 'content'" class="module-content content-module">
-        <div class="module-intro"><div><span>AI CONTENT STUDIO</span><h2>从真实资源，生成可发布内容</h2><p>生成过程只引用已审核资源信息，减少商家重复写作和内容失真。</p></div><span class="openclaw-badge">OPENCLAW ENABLED</span></div>
+        <div class="module-intro"><div><span>AI CONTENT STUDIO</span><h2>运营内容生成</h2></div><span class="openclaw-badge">OPENCLAW ENABLED</span></div>
         <div class="content-studio-grid">
           <form @submit.prevent="generateContent">
             <label><span>内容依据</span><select v-model="contentForm.sourceType"><option value="RESOURCE">单项文旅资源</option><option value="PRODUCT">旅游产品</option></select></label>
@@ -788,7 +886,7 @@ onMounted(async () => {
             <div><span>AI DRAFT</span><button type="button" :disabled="!contentResult" @click="copyGeneratedContent">复制文案</button></div>
             <h3>{{ contentForm.channel }}内容初稿</h3>
             <p v-if="contentResult">{{ contentResult }}</p>
-            <div v-else class="content-placeholder"><strong>等待生成</strong><span>OpenClaw 只会使用所选资源或产品中的可信事实。</span></div>
+            <div v-else class="content-placeholder"><strong>尚未生成内容</strong></div>
             <details v-if="contentFacts.length"><summary>查看本次使用的 {{ contentFacts.length }} 条可信事实</summary><ul><li v-for="fact in contentFacts" :key="fact">{{ fact }}</li></ul></details>
             <footer><span>{{ contentEngine || 'OPENCLAW' }}<template v-if="contentGeneratedAt"> · {{ new Date(contentGeneratedAt).toLocaleString('zh-CN') }}</template></span><b>人工确认 · 未发布</b></footer>
           </article>
@@ -796,55 +894,161 @@ onMounted(async () => {
       </section>
 
       <section v-else class="module-content insight-module">
-        <div class="module-intro"><div><span>VISITOR INSIGHT</span><h2>看见游客正在期待什么</h2><p>只汇总匿名化旅行需求与资源引用，不向商家展示游客身份和个人行程。</p></div><div class="module-stat"><strong>{{ dashboard?.requestsLast30Days ?? 0 }}</strong><small>近 30 日需求</small></div></div>
-        <div class="insight-grid">
-          <section class="trend-card"><div class="section-title"><div><span>INTEREST SHARE</span><h3>兴趣主题占比</h3></div><em>近 30 日</em></div><article v-for="trend in trends" :key="trend.label"><span>{{ trend.label }}</span><i><b :style="{ width: `${trend.share}%` }"></b></i><strong>{{ trend.count }} 次</strong></article><div v-if="!trends.length" class="inline-empty">游客生成行程后，兴趣主题会在这里形成聚合数据。</div></section>
-          <section class="portrait-card"><span>需求概况</span><h3>{{ topAudience }} · 平均 {{ dashboard?.averageDays ?? 0 }} 天</h3><p>近 30 日平均旅行预算约 ¥{{ Number(dashboard?.averageBudget ?? 0).toLocaleString('zh-CN') }}，所有指标均来自匿名化出行需求。</p><div><b v-for="segment in audienceSegments.slice(0, 4)" :key="segment.label">{{ segment.label }} {{ segment.share }}%</b><b v-if="!audienceSegments.length">等待需求积累</b></div><button type="button" @click="activeSection = 'products'">据此设计产品 →</button></section>
+        <div class="module-intro insight-intro"><div><span>VISITOR INSIGHT</span><h2>游客需求数据</h2></div><div class="module-stat"><strong>{{ dashboard?.requestsLast30Days ?? 0 }}</strong><small>近 30 日需求</small></div></div>
+
+        <div class="insight-kpi-grid">
+          <article><span>需求样本</span><strong>{{ dashboard?.requestsLast30Days ?? 0 }}</strong><small>近 30 日</small></article>
+          <article><span>平均预算</span><strong><i>¥</i>{{ Number(dashboard?.averageBudget ?? 0).toLocaleString('zh-CN') }}</strong><small>单次行程</small></article>
+          <article><span>平均天数</span><strong>{{ dashboard?.averageDays ?? 0 }}<i>天</i></strong><small>旅行时长</small></article>
+          <article><span>行程生成</span><strong>{{ dashboard?.plansLast7Days ?? 0 }}</strong><small>近 7 日</small></article>
         </div>
-        <section class="citation-card"><div class="section-title"><div><span>RESOURCE CITATION</span><h3>近 7 日行程资源引用</h3></div><em>{{ dashboard?.plansLast7Days ?? 0 }} 份方案</em></div><div v-if="resourceCitations.length" class="citation-list"><article v-for="(item, index) in resourceCitations" :key="item.resourceId"><span>0{{ index + 1 }}</span><strong>{{ item.resourceName }}</strong><b>{{ item.count }} 次</b></article></div><div v-else class="inline-empty">近期行程尚未引用商家资源。</div></section>
+
+        <div class="insight-visual-grid">
+          <section class="interest-visual-card">
+            <div class="section-title"><div><span>INTEREST SIGNAL</span><h3>兴趣主题热度</h3></div><em>近 30 日</em></div>
+            <div v-if="trends.length" class="interest-chart">
+              <div class="interest-ring" :style="{ '--interest-share': `${topInterestShare}%` }"><div><strong>{{ topInterestShare }}<small>%</small></strong><span>{{ topInterest }}</span></div></div>
+              <div class="interest-columns">
+                <article v-for="(trend, index) in trends.slice(0, 6)" :key="trend.label">
+                  <div><b :style="{ height: `${Math.max(12, Number(trend.count) / maxTrendCount * 100)}%` }"></b><i>{{ trend.count }}</i></div>
+                  <span>{{ trend.label }}</span><small>{{ trend.share }}%</small>
+                  <em>0{{ index + 1 }}</em>
+                </article>
+              </div>
+            </div>
+            <div v-else class="chart-empty">暂无需求数据</div>
+          </section>
+
+          <section class="audience-visual-card">
+            <div class="section-title"><div><span>AUDIENCE MIX</span><h3>同行人画像</h3></div><em>{{ topAudience }}</em></div>
+            <div v-if="audienceLegend.length" class="audience-chart">
+              <div class="audience-donut" :style="audienceDonutStyle"><div><strong>{{ dashboard?.requestsLast30Days ?? 0 }}</strong><span>需求</span></div></div>
+              <div class="audience-legend">
+                <article v-for="segment in audienceLegend" :key="segment.label"><i :style="{ background: segment.color }"></i><span>{{ segment.label }}</span><b>{{ segment.share }}%</b><small>{{ segment.count }} 次</small></article>
+              </div>
+            </div>
+            <div v-else class="chart-empty dark">暂无客群数据</div>
+          </section>
+        </div>
+
+        <section class="citation-card citation-visual-card">
+          <div class="section-title"><div><span>RESOURCE CITATION</span><h3>行程资源引用排行</h3></div><em>{{ dashboard?.plansLast7Days ?? 0 }} 份方案 · 近 7 日</em></div>
+          <div v-if="resourceCitations.length" class="citation-chart">
+            <article v-for="(item, index) in resourceCitations" :key="item.resourceId"><span>0{{ index + 1 }}</span><strong>{{ item.resourceName }}</strong><i><b :style="{ width: `${Number(item.count) / maxCitationCount * 100}%` }"></b></i><em>{{ item.count }} 次</em></article>
+          </div>
+          <div v-else class="chart-empty compact">暂无引用数据</div>
+        </section>
       </section>
     </section>
 
     <Transition name="merchant-toast"><div v-if="toast" class="merchant-toast">{{ toast }}</div></Transition>
     <div v-if="resourceModalOpen" class="resource-modal-backdrop" @click.self="resourceModalOpen = false">
-      <form class="resource-modal" @submit.prevent="addResource">
-        <button type="button" @click="resourceModalOpen = false">×</button>
-        <span>NEW RESOURCE</span>
-        <h2>新增文旅资源</h2>
-        <p>基础信息将直接写入资源库，审核上线后即可参与游客行程推荐。</p>
-        <label><span>资源或体验名称</span><input v-model.trim="newResource.name" placeholder="例如：运河蓝染亲子体验" /></label>
-        <label>
-          <span>高德真实地点</span>
-          <div class="poi-search-row">
-            <input v-model.trim="newResource.placeQuery" placeholder="搜索体验实际发生的场馆或门店" @keyup.enter.prevent="searchResourcePoi" />
-            <button type="button" :disabled="poiSearching" @click="searchResourcePoi">{{ poiSearching ? '搜索中' : '搜索' }}</button>
+      <form class="resource-modal resource-smart-modal" @submit.prevent="addResource">
+        <button class="smart-modal-close" type="button" aria-label="关闭" @click="resourceModalOpen = false">×</button>
+        <header class="resource-smart-head">
+          <div><span>OPENCLAW RESOURCE DESK</span><h2>新资源上架工作台</h2></div>
+        </header>
+
+        <div class="resource-smart-stages">
+          <div :class="{ active: !newResource.amapPoiId, done: newResource.amapPoiId }"><b>01</b><span>绑定地点</span></div>
+          <i></i>
+          <div :class="{ active: newResource.amapPoiId && (!resourceAudit || resourceAuditStale), done: resourceAudit && !resourceAuditStale }"><b>02</b><span>智能审核</span></div>
+          <i></i>
+          <div :class="{ active: resourceAudit && !resourceAuditStale }"><b>03</b><span>确认发布</span></div>
+        </div>
+
+        <div class="resource-smart-body">
+          <section class="resource-entry-pane">
+            <div class="entry-section-title"><b>经营资料</b></div>
+            <div class="modal-grid city-name-grid">
+              <label><span>经营城市 *</span><input v-model.trim="newResource.city" placeholder="例如：苏州" /></label>
+              <label><span>资源或体验名称 *</span><input v-model.trim="newResource.name" placeholder="例如：园林拓印体验" /></label>
+            </div>
+            <label>
+              <span>高德真实地点 *</span>
+              <div class="poi-search-row">
+                <input v-model.trim="newResource.placeQuery" placeholder="搜索场馆、景点或门店" @keyup.enter.prevent="searchResourcePoi" />
+                <button type="button" :disabled="poiSearching" @click="searchResourcePoi">{{ poiSearching ? '定位中' : '搜索 POI' }}</button>
+              </div>
+            </label>
+            <div v-if="poiResults.length" class="poi-result-list">
+              <button v-for="poi in poiResults" :key="poi.id" type="button" @click="selectResourcePoi(poi)">
+                <strong>{{ poi.name }}</strong><small>{{ poi.address || poi.district || newResource.city }}</small>
+              </button>
+            </div>
+            <p v-if="poiSearchError" class="poi-search-error">{{ poiSearchError }}</p>
+            <div v-if="newResource.amapPoiId" class="selected-poi smart-selected-poi">
+              <span>AMAP VERIFIED</span><strong>{{ newResource.placeName }}</strong>
+              <small>{{ newResource.address || newResource.district }}</small>
+              <small>{{ newResource.longitude.toFixed(6) }}, {{ newResource.latitude.toFixed(6) }} · {{ newResource.amapPoiId }}</small>
+            </div>
+            <div class="modal-grid">
+              <label><span>资源类型</span><select v-model="newResource.category"><option v-for="option in categoryOptions" :key="option.value" :value="option.value">{{ option.label }}</option></select></label>
+              <label><span>所在区域</span><input v-model.trim="newResource.district" placeholder="选择地点后自动填写" /></label>
+            </div>
+            <label><span>体验简介</span><textarea v-model.trim="newResource.summary" rows="3"></textarea></label>
+            <label><span>资源标签</span><input v-model.trim="newResource.tags" placeholder="使用顿号分隔" /></label>
+            <div class="modal-grid">
+              <label><span>开放时间</span><input v-model.trim="newResource.openHours" placeholder="例如：09:00-17:00" /></label>
+              <label><span>价格区间（元）</span><div class="price-row"><input v-model.number="newResource.priceMin" min="0" type="number" /><i>至</i><input v-model.number="newResource.priceMax" min="0" type="number" /></div></label>
+            </div>
+            <label class="reservation-switch"><input v-model="newResource.reservationRequired" type="checkbox" /><span>需要预约</span></label>
+            <div v-if="newResource.reservationRequired" class="modal-grid">
+              <label><span>每日接待容量</span><input v-model.number="newResource.dailyCapacity" min="1" type="number" /></label>
+              <label><span>当前可预约余量</span><input v-model.number="newResource.availableCapacity" min="0" type="number" /></label>
+            </div>
+          </section>
+
+          <aside class="resource-audit-pane">
+            <div class="audit-pane-head">
+              <span>{{ resourceAudit?.engine === 'OPENCLAW' ? 'OPENCLAW ONLINE' : 'PRE-PUBLISH REVIEW' }}</span>
+              <b :class="{ live: resourceAudit?.engine === 'OPENCLAW' }">{{ resourceAudit?.engine === 'OPENCLAW' ? '主引擎审核' : resourceAudit ? '规则预检' : '等待资料' }}</b>
+            </div>
+
+            <div v-if="resourceAuditing" class="audit-scanning">
+              <div class="claw-orbit"><span>灵</span><i></i></div>
+              <h3>正在核验这项资源</h3>
+              <div><i></i><i></i><i></i></div>
+            </div>
+
+            <div v-else-if="!resourceAudit || resourceAuditStale" class="audit-empty-state">
+              <div class="claw-orbit"><span>灵</span><i></i></div>
+              <h3>{{ resourceAuditStale ? '资料已发生变化' : '等待智能审核' }}</h3>
+              <button type="button" :disabled="resourceAuditing" @click="auditResourceDraft">开始智能审核 <span>→</span></button>
+            </div>
+
+            <div v-else class="audit-result">
+              <div class="audit-score-card">
+                <div><span>资料完整度</span><b>{{ resourceAudit.currentScore }}</b><i>当前</i></div>
+                <em>→</em>
+                <div class="projected"><span>补全后预计</span><b>{{ resourceAudit.projectedScore }}</b><i>/ 100</i></div>
+              </div>
+              <div class="audit-verdict" :class="{ warning: !resourceAudit.recommendable }">
+                <span>{{ resourceAudit.recommendable ? '审核通过' : '建议完善后发布' }}</span>
+                <p>{{ resourceAudit.recommendationRationale }}</p>
+              </div>
+              <div class="audit-check-list">
+                <article v-for="check in resourceAudit.checks" :key="check.code">
+                  <i :class="check.status">{{ check.status === 'PASS' ? '✓' : check.status === 'IMPROVED' ? '+' : '!' }}</i>
+                  <div><b>{{ check.label }}</b><small>{{ check.detail }}</small></div>
+                </article>
+              </div>
+              <section class="traveler-preview">
+                <header><span>游客侧预览</span><b>{{ newResource.city }} · {{ selectedCategoryLabel }}</b></header>
+                <div><small>{{ newResource.district }} / {{ resourceAudit.generatedTags.slice(0, 3).join(' · ') }}</small><h3>{{ newResource.name }}</h3><p>{{ resourceAudit.generatedSummary }}</p></div>
+              </section>
+              <button class="apply-audit-button" type="button" @click="applyResourceAudit">应用简介与标签 <span>→</span></button>
+            </div>
+          </aside>
+        </div>
+
+        <footer class="resource-smart-footer">
+          <label><input v-model="publishAfterCreate" type="checkbox" /><span>审核通过后直接发布</span></label>
+          <div>
+            <button type="button" :disabled="resourceAuditing" @click="auditResourceDraft">{{ resourceAudit && !resourceAuditStale ? '重新审核' : '智能审核' }}</button>
+            <button type="submit" :disabled="resourceSaving || resourceAuditing || !resourceAudit || resourceAuditStale || !resourceAudit.recommendable">{{ resourceSaving ? '正在同步资源...' : publishAfterCreate ? '确认并发布 →' : '保存为草稿 →' }}</button>
           </div>
-        </label>
-        <div v-if="poiResults.length" class="poi-result-list">
-          <button v-for="poi in poiResults" :key="poi.id" type="button" @click="selectResourcePoi(poi)">
-            <strong>{{ poi.name }}</strong><small>{{ poi.address || poi.district || '杭州' }}</small>
-          </button>
-        </div>
-        <p v-if="poiSearchError" class="poi-search-error">{{ poiSearchError }}</p>
-        <div v-if="newResource.amapPoiId" class="selected-poi">
-          <span>已绑定高德 POI</span><strong>{{ newResource.placeName }}</strong>
-          <small>{{ newResource.address || newResource.district }} · {{ newResource.longitude.toFixed(6) }}, {{ newResource.latitude.toFixed(6) }}</small>
-          <small>POI ID · {{ newResource.amapPoiId }}</small>
-        </div>
-        <label><span>资源类型</span><select v-model="newResource.category"><option v-for="option in categoryOptions" :key="option.value" :value="option.value">{{ option.label }}</option></select></label>
-        <label><span>所在区域</span><input v-model.trim="newResource.district" placeholder="选择地点后自动填写" /></label>
-        <label><span>体验简介</span><textarea v-model.trim="newResource.summary" rows="3" placeholder="说明体验内容、适合人群和建议停留时间"></textarea></label>
-        <label><span>资源标签</span><input v-model.trim="newResource.tags" placeholder="使用顿号分隔，例如：亲子友好、需预约" /></label>
-        <div class="modal-grid">
-          <label><span>开放时间</span><input v-model.trim="newResource.openHours" placeholder="例如：09:00-17:00" /></label>
-          <label><span>价格区间（元）</span><div class="price-row"><input v-model.number="newResource.priceMin" min="0" type="number" /><i>至</i><input v-model.number="newResource.priceMax" min="0" type="number" /></div></label>
-        </div>
-        <label class="reservation-switch"><input v-model="newResource.reservationRequired" type="checkbox" /><span>该资源需要预约，并按当前余量参与推荐</span></label>
-        <div v-if="newResource.reservationRequired" class="modal-grid">
-          <label><span>每日接待容量</span><input v-model.number="newResource.dailyCapacity" min="1" type="number" /></label>
-          <label><span>当前可预约余量</span><input v-model.number="newResource.availableCapacity" min="0" type="number" /></label>
-        </div>
-        <button class="modal-submit" type="submit" :disabled="resourceSaving">{{ resourceSaving ? '正在写入资源库...' : '创建并继续完善 →' }}</button>
+        </footer>
       </form>
     </div>
     <div v-if="resourceEditorOpen" class="resource-modal-backdrop" @click.self="resourceEditorOpen = false">
@@ -852,7 +1056,6 @@ onMounted(async () => {
         <button type="button" @click="resourceEditorOpen = false">×</button>
         <span>RESOURCE OPERATIONS</span>
         <h2>编辑经营信息</h2>
-        <p>保存后会同步到游客推荐池和 OpenClaw 资源目录；余量为 0 时自动停止推荐。</p>
         <label><span>资源或体验名称</span><input v-model.trim="editingResource.name" /></label>
         <label><span>资源类型</span><select v-model="editingResource.category"><option v-for="option in categoryOptions" :key="option.value" :value="option.value">{{ option.label }}</option></select></label>
         <label><span>体验简介</span><textarea v-model.trim="editingResource.summary" rows="4"></textarea></label>
@@ -861,17 +1064,14 @@ onMounted(async () => {
           <label><span>开放时间</span><input v-model.trim="editingResource.openHours" placeholder="例如：09:00-17:00" /></label>
           <label><span>价格区间（元）</span><div class="price-row"><input v-model.number="editingResource.priceMin" min="0" type="number" /><i>至</i><input v-model.number="editingResource.priceMax" min="0" type="number" /></div></label>
         </div>
-        <label class="reservation-switch"><input v-model="editingResource.reservationRequired" type="checkbox" /><span>需要预约，并按当前余量参与游客推荐</span></label>
+        <label class="reservation-switch"><input v-model="editingResource.reservationRequired" type="checkbox" /><span>需要预约</span></label>
         <div v-if="editingResource.reservationRequired" class="capacity-panel">
           <div class="modal-grid">
             <label><span>每日接待容量</span><input v-model.number="editingResource.dailyCapacity" min="1" type="number" /></label>
             <label><span>当前可预约余量</span><input v-model.number="editingResource.availableCapacity" min="0" type="number" /></label>
           </div>
-          <p :class="{ alert: Number(editingResource.availableCapacity) === 0 }">
-            {{ Number(editingResource.availableCapacity) === 0 ? '保存后该资源会立即退出游客推荐池。' : '保存后余量会同步给 OpenClaw 规划目录。' }}
-          </p>
         </div>
-        <button class="modal-submit" type="submit" :disabled="resourceEditing">{{ resourceEditing ? '正在同步...' : '保存并同步推荐目录 →' }}</button>
+        <button class="modal-submit" type="submit" :disabled="resourceEditing">{{ resourceEditing ? '正在保存...' : '保存修改 →' }}</button>
       </form>
     </div>
     <div v-if="productModalOpen" class="resource-modal-backdrop" @click.self="productModalOpen = false">
@@ -879,7 +1079,6 @@ onMounted(async () => {
         <button type="button" @click="productModalOpen = false">×</button>
         <span>TOURISM PRODUCT</span>
         <h2>{{ productForm.id ? '编辑旅游产品' : '创建产品草稿' }}</h2>
-        <p>从已上线资源中组合主题体验。产品默认保存为草稿，发布时会再次检查资源状态。</p>
         <label><span>产品名称</span><input v-model.trim="productForm.name" placeholder="例如：运河非遗亲子慢游 · 两日" /></label>
         <div class="modal-grid">
           <label><span>目标客群</span><input v-model.trim="productForm.targetAudience" placeholder="例如：亲子家庭" /></label>
@@ -891,7 +1090,6 @@ onMounted(async () => {
         <fieldset class="product-resource-picker">
           <legend>选择组合资源 <small>已选 {{ productForm.resourceIds.length }} 项，至少选择 2 项</small></legend>
           <input v-model.trim="productResourceSearch" aria-label="搜索可组合资源" class="product-resource-search" placeholder="搜索资源名称、类型、区域或标签" />
-          <small class="product-resource-count">已选资源始终置顶 · 显示 {{ visibleProductResourceOptions.length }} / {{ productResourceOptions.length }} 项可选资源</small>
           <label v-for="resource in visibleProductResourceOptions" :key="resource.id">
             <input v-model="productForm.resourceIds" :value="resource.id" type="checkbox" />
             <span><strong>{{ resource.name }}</strong><small>{{ resource.type }} · {{ resource.area }} · {{ resource.availabilityLabel }}</small></span>
@@ -1105,6 +1303,81 @@ onMounted(async () => {
 .citation-list strong { overflow: hidden; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
 .citation-list b { color: var(--merchant-red); font-size: 9px; font-weight: 500; }
 
+.insight-module { gap: 14px; }
+.insight-intro { padding-bottom: 14px; }
+.insight-kpi-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border: 1px solid rgba(38, 51, 46, .1); background: rgba(255, 252, 246, .74); }
+.insight-kpi-grid article { position: relative; display: grid; min-height: 104px; padding: 17px 19px; border-right: 1px solid rgba(38, 51, 46, .09); }
+.insight-kpi-grid article:last-child { border-right: 0; }
+.insight-kpi-grid article::after { position: absolute; right: 13px; top: 13px; width: 5px; height: 5px; content: ''; background: var(--merchant-red); }
+.insight-kpi-grid span { color: #7a817b; font-size: 8px; letter-spacing: 1px; }
+.insight-kpi-grid strong { align-self: center; color: var(--merchant-green); font-size: 28px; font-weight: 500; line-height: 1; }
+.insight-kpi-grid strong i { margin-right: 3px; color: var(--merchant-red); font-size: 12px; font-style: normal; }
+.insight-kpi-grid strong i:last-child { margin: 0 0 0 4px; color: #80867f; font-size: 9px; }
+.insight-kpi-grid small { align-self: end; color: #a09e96; font-size: 7px; }
+
+.insight-visual-grid { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(310px, .65fr); gap: 12px; }
+.interest-visual-card,
+.audience-visual-card,
+.citation-visual-card { min-width: 0; padding: 19px 21px; border: 1px solid rgba(38, 51, 46, .09); background: rgba(255, 252, 246, .82); }
+.interest-visual-card { border-top: 3px solid var(--merchant-green); }
+.interest-chart { display: grid; grid-template-columns: 155px minmax(0, 1fr); align-items: center; gap: 23px; min-height: 218px; }
+.interest-ring { display: grid; width: 142px; height: 142px; place-items: center; border-radius: 50%; background: conic-gradient(var(--merchant-red) var(--interest-share), #e8e1d5 0); transform: rotate(-90deg); }
+.interest-ring::before { width: 101px; height: 101px; content: ''; border-radius: 50%; background: #f8f3e9; box-shadow: inset 0 0 0 1px rgba(38, 51, 46, .06); }
+.interest-ring > div { position: absolute; display: grid; max-width: 84px; text-align: center; transform: rotate(90deg); }
+.interest-ring strong { color: var(--merchant-green); font-size: 27px; font-weight: 500; line-height: 1; }
+.interest-ring strong small { font-size: 9px; }
+.interest-ring span { margin-top: 7px; overflow: hidden; color: #777c76; font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
+.interest-columns { display: grid; grid-template-columns: repeat(6, minmax(35px, 1fr)); align-items: end; gap: 8px; min-width: 0; padding: 0 3px 5px; border-bottom: 1px solid rgba(38, 51, 46, .14); }
+.interest-columns article { position: relative; display: grid; grid-template-rows: 132px 27px auto; min-width: 0; text-align: center; }
+.interest-columns article > div { position: relative; display: flex; align-items: end; width: 100%; height: 126px; padding-top: 20px; }
+.interest-columns article > div b { display: block; width: 100%; min-height: 12px; background: linear-gradient(180deg, #55796d, #315b50); box-shadow: inset 0 1px rgba(255, 255, 255, .22); animation: insight-bar-rise .5s ease both; transform-origin: bottom; }
+.interest-columns article:nth-child(even) > div b { background: linear-gradient(180deg, #c98066, #ad5b44); }
+.interest-columns article > div i { position: absolute; top: 2px; left: 0; width: 100%; color: var(--merchant-red); font-size: 8px; font-style: normal; }
+.interest-columns article > span { align-self: center; overflow: hidden; color: #555f59; font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
+.interest-columns article > small { color: #a09e96; font-size: 7px; }
+.interest-columns article > em { position: absolute; right: 2px; top: 25px; color: rgba(255, 255, 255, .55); font-size: 6px; font-style: normal; writing-mode: vertical-rl; }
+
+.audience-visual-card { color: #fffaf1; border: 0; background: radial-gradient(circle at 90% 0, rgba(199, 124, 90, .26), transparent 34%), #315b50; }
+.audience-visual-card .section-title { border-bottom: 1px solid rgba(255, 255, 255, .12); padding-bottom: 13px; }
+.audience-visual-card .section-title span { color: #e7b199; }
+.audience-visual-card .section-title h3 { color: #fffaf1; }
+.audience-visual-card .section-title em { color: rgba(255, 250, 241, .58); }
+.audience-chart { display: grid; grid-template-columns: 142px 1fr; align-items: center; gap: 18px; min-height: 218px; }
+.audience-donut { display: grid; width: 132px; height: 132px; place-items: center; border-radius: 50%; }
+.audience-donut::before { width: 86px; height: 86px; content: ''; border-radius: 50%; background: #315b50; box-shadow: 0 0 0 1px rgba(255, 255, 255, .14); }
+.audience-donut > div { position: absolute; display: grid; text-align: center; }
+.audience-donut strong { color: #fffaf1; font-size: 25px; font-weight: 500; line-height: 1; }
+.audience-donut span { margin-top: 5px; color: rgba(255, 250, 241, .55); font-size: 7px; letter-spacing: 1px; }
+.audience-legend { display: grid; align-content: center; }
+.audience-legend article { display: grid; grid-template-columns: 7px minmax(0, 1fr) auto; align-items: center; gap: 8px; min-width: 0; padding: 8px 0; border-bottom: 1px solid rgba(255, 255, 255, .09); }
+.audience-legend article:last-child { border-bottom: 0; }
+.audience-legend i { width: 7px; height: 7px; border-radius: 50%; }
+.audience-legend span { overflow: hidden; color: rgba(255, 250, 241, .78); font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
+.audience-legend b { color: #fffaf1; font-size: 9px; font-weight: 500; }
+.audience-legend small { grid-column: 2 / -1; margin-top: -5px; color: rgba(255, 250, 241, .38); font-size: 6px; }
+
+.citation-visual-card { padding-bottom: 21px; }
+.citation-chart { display: grid; grid-template-columns: 1fr 1fr; gap: 0 30px; }
+.citation-chart article { display: grid; grid-template-columns: 24px minmax(100px, .8fr) minmax(90px, 1fr) 38px; align-items: center; gap: 9px; min-width: 0; padding: 10px 0; border-top: 1px solid rgba(38, 51, 46, .07); }
+.citation-chart article > span { color: #b7ada0; font-size: 7px; }
+.citation-chart article > strong { overflow: hidden; font-size: 9px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+.citation-chart article > i { height: 5px; overflow: hidden; background: #e8e1d5; }
+.citation-chart article > i b { display: block; height: 100%; min-width: 5px; background: linear-gradient(90deg, var(--merchant-green), #8ba095); animation: citation-bar-grow .55s ease both; transform-origin: left; }
+.citation-chart article > em { justify-self: end; color: var(--merchant-red); font-size: 8px; font-style: normal; }
+.chart-empty { display: grid; min-height: 218px; place-items: center; color: #999b94; font-size: 9px; }
+.chart-empty.dark { color: rgba(255, 250, 241, .52); }
+.chart-empty.compact { min-height: 90px; }
+
+@keyframes insight-bar-rise {
+  from { opacity: .25; transform: scaleY(.08); }
+  to { opacity: 1; transform: scaleY(1); }
+}
+
+@keyframes citation-bar-grow {
+  from { opacity: .25; transform: scaleX(.05); }
+  to { opacity: 1; transform: scaleX(1); }
+}
+
 .merchant-toast { position: fixed; right: 28px; bottom: 28px; z-index: 80; padding: 12px 18px; border-radius: 10px; background: #26332e; color: #fffaf1; font-size: 10px; box-shadow: 0 15px 35px rgba(38, 51, 46, .22); }
 .merchant-toast-enter-active, .merchant-toast-leave-active { transition: opacity .25s, transform .25s; }
 .merchant-toast-enter-from, .merchant-toast-leave-to { opacity: 0; transform: translateY(8px); }
@@ -1198,5 +1471,722 @@ onMounted(async () => {
   .modal-grid { grid-template-columns: 1fr; }
   .product-grid { grid-template-columns: 1fr; }
   .citation-list { grid-template-columns: 1fr; }
+}
+
+/* Competition presentation layout: editorial operations console. */
+.merchant-app {
+  grid-template-columns: 218px minmax(0, 1fr);
+  background:
+    linear-gradient(rgba(49, 91, 80, .022) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(49, 91, 80, .022) 1px, transparent 1px),
+    #f3eee4;
+  background-size: 34px 34px;
+}
+
+.merchant-sidebar {
+  z-index: 12;
+  padding: 22px 14px 17px;
+  border-right: 0;
+  background:
+    radial-gradient(circle at 10% 3%, rgba(179, 101, 75, .2), transparent 25%),
+    #263f38;
+  color: #f8f1e5;
+  box-shadow: 10px 0 32px rgba(32, 54, 47, .08);
+}
+
+.merchant-brand {
+  gap: 12px;
+  margin: 0 7px 36px;
+  color: #fffaf1;
+}
+
+.merchant-brand > span {
+  width: 40px;
+  height: 44px;
+  border: 1px solid rgba(255, 250, 241, .26);
+  border-radius: 0 0 13px 13px;
+  background: #aa5b45;
+  color: #fffaf1;
+  font-size: 18px;
+  box-shadow: 0 8px 18px rgba(15, 31, 26, .18);
+}
+
+.merchant-brand strong {
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.merchant-brand small {
+  color: rgba(255, 250, 241, .5);
+  font-size: 8px;
+}
+
+.merchant-sidebar nav {
+  gap: 5px;
+}
+
+.merchant-sidebar nav button {
+  gap: 11px;
+  padding: 9px 10px;
+  border-radius: 2px;
+  color: rgba(255, 250, 241, .68);
+  font-size: 11px;
+  transition: background .2s ease, color .2s ease, transform .2s ease;
+}
+
+.merchant-sidebar nav button i {
+  width: 27px;
+  height: 27px;
+  border-color: rgba(255, 250, 241, .15);
+  border-radius: 50%;
+  color: rgba(255, 250, 241, .7);
+}
+
+.merchant-sidebar nav button:hover {
+  background: rgba(255, 250, 241, .08);
+  color: #fffaf1;
+  transform: translateX(2px);
+}
+
+.merchant-sidebar nav button.active {
+  background: #f0e7d8;
+  color: #263f38;
+}
+
+.merchant-sidebar nav button.active i {
+  border-color: rgba(38, 63, 56, .18);
+  color: #aa5b45;
+}
+
+.merchant-user {
+  border-top-color: rgba(255, 250, 241, .12);
+}
+
+.merchant-user > span {
+  border-radius: 2px;
+  background: rgba(255, 250, 241, .12);
+  color: #edb092;
+}
+
+.merchant-user strong { color: #fffaf1; }
+.merchant-user small { color: rgba(255, 250, 241, .46); }
+.merchant-user button { color: rgba(255, 250, 241, .55); }
+
+.merchant-main {
+  min-height: 100vh;
+}
+
+.merchant-topbar {
+  position: sticky;
+  z-index: 10;
+  top: 0;
+  height: 72px;
+  padding: 0 clamp(22px, 3.5vw, 48px);
+  border-bottom-color: rgba(38, 51, 46, .1);
+  background: rgba(247, 243, 234, .9);
+  backdrop-filter: blur(15px);
+}
+
+.merchant-topbar span,
+.section-title span {
+  color: #a55540;
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 2.1px;
+}
+
+.merchant-topbar h1 {
+  margin-top: 2px;
+  font-size: 21px;
+  letter-spacing: 1px;
+}
+
+.topbar-actions {
+  gap: 7px;
+}
+
+.topbar-actions a,
+.topbar-actions button,
+.coming-soon button {
+  padding: 8px 13px;
+  border-radius: 2px;
+  font-size: 9px;
+}
+
+.dashboard-content,
+.module-content {
+  width: min(1460px, 100%);
+  margin: 0 auto;
+}
+
+.dashboard-content {
+  gap: 14px;
+  padding: 18px clamp(22px, 3.5vw, 48px) 38px;
+}
+
+.merchant-welcome {
+  position: relative;
+  min-height: 176px;
+  padding: 24px 30px;
+  border: 1px solid rgba(255, 250, 241, .1);
+  border-radius: 2px;
+  background:
+    radial-gradient(circle at 75% 20%, rgba(189, 127, 94, .2), transparent 28%),
+    linear-gradient(108deg, #263f38, #365b50);
+  box-shadow: 0 18px 42px rgba(38, 63, 56, .13);
+}
+
+.merchant-welcome::after {
+  position: absolute;
+  right: 135px;
+  bottom: -72px;
+  width: 190px;
+  height: 190px;
+  content: '';
+  border: 1px solid rgba(255, 250, 241, .08);
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 26px rgba(255, 250, 241, .025);
+}
+
+.welcome-copy {
+  position: relative;
+  z-index: 1;
+  min-width: 0;
+}
+
+.merchant-welcome .welcome-copy > span {
+  font-size: 8px;
+  letter-spacing: 2px;
+  opacity: .62;
+}
+
+.merchant-welcome h2 {
+  margin: 6px 0 18px;
+  font-size: clamp(22px, 2vw, 28px);
+  letter-spacing: 1px;
+}
+
+.welcome-pulse {
+  display: flex;
+  align-items: stretch;
+}
+
+.welcome-pulse button {
+  display: grid;
+  min-width: 150px;
+  gap: 2px;
+  padding: 0 22px;
+  border: 0;
+  border-left: 1px solid rgba(255, 250, 241, .18);
+  background: transparent;
+  color: #fffaf1;
+  cursor: pointer;
+  font-family: inherit;
+  text-align: left;
+}
+
+.welcome-pulse button:first-child {
+  padding-left: 0;
+  border-left: 0;
+}
+
+.welcome-pulse strong {
+  overflow: hidden;
+  font-size: 18px;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.welcome-pulse small {
+  color: rgba(255, 250, 241, .56);
+  font-size: 8px;
+}
+
+.quality-ring {
+  position: relative;
+  z-index: 1;
+  width: 96px;
+  height: 96px;
+  border-color: rgba(255, 250, 241, .3);
+  box-shadow: inset 0 0 0 6px rgba(255, 250, 241, .06), 0 12px 25px rgba(17, 35, 29, .12);
+}
+
+.quality-ring strong { font-size: 26px; }
+
+.metric-grid {
+  gap: 0;
+  overflow: hidden;
+  border: 1px solid rgba(38, 51, 46, .1);
+  border-radius: 2px;
+  background: rgba(255, 252, 246, .78);
+  box-shadow: 0 10px 28px rgba(38, 51, 46, .04);
+}
+
+.metric-grid article {
+  min-height: 100px;
+  padding: 15px 18px;
+  border: 0;
+  border-left: 1px solid rgba(38, 51, 46, .09);
+  border-radius: 0;
+  background: transparent;
+}
+
+.metric-grid article:first-child { border-left: 0; }
+.metric-grid article > span { font-size: 9px; }
+.metric-grid strong { margin: 3px 0; font-size: 24px; }
+.metric-grid small { font-size: 8px; }
+
+.dashboard-grid {
+  grid-template-columns: minmax(0, 1.35fr) minmax(300px, .65fr);
+  gap: 12px;
+}
+
+.resource-card,
+.task-card,
+.trend-card,
+.portrait-card,
+.citation-card {
+  border-radius: 2px;
+  background: rgba(255, 252, 246, .8);
+  box-shadow: 0 10px 30px rgba(38, 51, 46, .045);
+}
+
+.resource-card { border-top: 3px solid #315b50; }
+.task-card { border-top: 3px solid #aa5b45; }
+.section-title h3 { font-size: 16px; }
+.resource-table strong, .task-card strong { font-size: 10px; }
+
+.insight-strip {
+  grid-template-columns: 100px 1fr auto;
+  padding: 13px 18px;
+  border: 1px solid rgba(38, 51, 46, .1);
+  border-left: 3px solid #aa5b45;
+  background: rgba(255, 252, 246, .7);
+}
+
+.module-content {
+  gap: 15px;
+  padding: 22px clamp(22px, 3.5vw, 48px) 44px;
+}
+
+.module-intro {
+  padding: 3px 0 19px;
+  border: 0;
+  border-bottom: 1px solid rgba(38, 51, 46, .14);
+  border-radius: 0;
+  background: transparent;
+}
+
+.module-intro h2 {
+  margin: 4px 0 5px;
+  font-size: clamp(21px, 2vw, 27px);
+}
+
+.module-intro p {
+  font-size: 10px;
+}
+
+.module-stat {
+  padding: 8px 0 8px 24px;
+}
+
+.primary-module-action,
+.module-toolbar > button {
+  border-radius: 2px;
+}
+
+.resource-toolbar-left > input,
+.filter-tabs button {
+  border-radius: 2px;
+}
+
+.resource-management-list article {
+  border-left: 3px solid rgba(49, 91, 80, .42);
+  border-radius: 2px;
+  background: rgba(255, 252, 246, .78);
+}
+
+.resource-score {
+  width: 48px;
+  height: 48px;
+  border-radius: 2px;
+  background: rgba(49, 91, 80, .04);
+}
+
+.resource-copy h3 { font-size: 13px; }
+.resource-actions button { border-radius: 2px; }
+
+.product-grid article,
+.new-product-card {
+  min-height: 286px;
+  border-top: 3px solid #315b50;
+  border-radius: 2px;
+  background: rgba(255, 252, 246, .82);
+  box-shadow: 0 12px 30px rgba(38, 51, 46, .05);
+}
+
+.product-grid h3 { margin-top: 14px; font-size: 17px; }
+.product-grid footer button { border-radius: 2px; }
+
+.openclaw-badge {
+  border-radius: 2px;
+  background: rgba(49, 91, 80, .05);
+}
+
+.content-studio-grid {
+  grid-template-columns: minmax(280px, .58fr) minmax(0, 1.42fr);
+  gap: 12px;
+}
+
+.content-studio-grid form,
+.content-result {
+  border-radius: 2px;
+  background: rgba(255, 252, 246, .82);
+}
+
+.content-result {
+  min-height: 390px;
+  border-top: 3px solid #315b50;
+}
+
+.content-studio-grid select,
+.content-studio-grid textarea,
+.resource-modal input,
+.resource-modal select,
+.resource-modal textarea,
+.content-studio-grid form > button {
+  border-radius: 2px;
+}
+
+.portrait-card {
+  border: 0;
+  background:
+    radial-gradient(circle at 90% 10%, rgba(181, 105, 77, .25), transparent 30%),
+    #315b50;
+}
+
+.citation-list article { border-radius: 2px; }
+
+.dashboard-content > *,
+.module-content > * {
+  animation: merchant-section-arrive .42s ease both;
+}
+
+.dashboard-content > :nth-child(2),
+.module-content > :nth-child(2) { animation-delay: .05s; }
+.dashboard-content > :nth-child(3),
+.module-content > :nth-child(3) { animation-delay: .1s; }
+.dashboard-content > :nth-child(4),
+.module-content > :nth-child(4) { animation-delay: .15s; }
+
+@keyframes merchant-section-arrive {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@media (max-width: 1050px) {
+  .merchant-app { grid-template-columns: 76px minmax(0, 1fr); }
+  .merchant-sidebar { padding-inline: 9px; }
+  .merchant-brand { justify-content: center; margin-inline: 0; }
+  .merchant-brand div { display: none; }
+  .merchant-sidebar nav button,
+  .merchant-sidebar nav button.active,
+  .merchant-sidebar nav button:not(.active) { justify-content: center; font-size: 0; }
+  .merchant-user div { display: none; }
+  .merchant-user { grid-template-columns: 1fr; justify-items: center; }
+  .merchant-user button { width: 100%; padding-top: 5px; }
+  .welcome-pulse button { min-width: 120px; padding-inline: 15px; }
+  .metric-grid { grid-template-columns: 1fr 1fr; }
+  .metric-grid article:nth-child(3) { border-left: 0; border-top: 1px solid rgba(38, 51, 46, .09); }
+  .metric-grid article:nth-child(4) { border-top: 1px solid rgba(38, 51, 46, .09); }
+  .dashboard-grid { grid-template-columns: 1fr; }
+  .content-studio-grid,
+  .insight-grid { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 700px) {
+  .merchant-app { display: block; }
+  .merchant-sidebar { position: relative; width: 100%; height: auto; padding: 10px 14px; }
+  .merchant-brand { display: none; }
+  .merchant-sidebar nav { display: flex; gap: 5px; overflow-x: auto; }
+  .merchant-sidebar nav button,
+  .merchant-sidebar nav button.active,
+  .merchant-sidebar nav button:not(.active) { flex-shrink: 0; padding: 8px 12px; font-size: 10px; }
+  .merchant-sidebar nav button i { display: none; }
+  .merchant-user { display: none; }
+  .merchant-topbar { height: auto; min-height: 66px; padding: 13px 16px; }
+  .topbar-actions a { display: none; }
+  .dashboard-content,
+  .module-content { padding: 13px 14px 34px; }
+  .merchant-welcome { min-height: 0; padding: 21px; }
+  .welcome-pulse { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .welcome-pulse button { min-width: 0; padding: 0; border: 0; }
+  .welcome-pulse button:last-child { grid-column: 1 / -1; }
+  .quality-ring { display: none; }
+  .metric-grid { grid-template-columns: 1fr 1fr; }
+  .metric-grid article { min-height: 92px; padding: 13px; }
+  .insight-strip { grid-template-columns: 1fr; }
+  .module-intro { align-items: flex-start; padding: 3px 0 15px; }
+  .resource-management-list article { grid-template-columns: 48px 1fr auto; }
+  .product-grid { grid-template-columns: 1fr; }
+}
+
+/* Resource onboarding is deliberately staged so the OpenClaw step is visible in demos. */
+.resource-modal.resource-smart-modal {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  gap: 0;
+  width: min(1080px, calc(100vw - 36px));
+  height: min(790px, calc(100vh - 32px));
+  max-height: none;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid rgba(38, 51, 46, .14);
+  border-radius: 4px;
+  background: #f8f4eb;
+  box-shadow: 0 28px 90px rgba(24, 34, 30, .32);
+}
+
+.resource-smart-modal .smart-modal-close {
+  z-index: 3;
+  top: 19px;
+  right: 24px;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, .22);
+  border-radius: 50%;
+  color: rgba(255, 255, 255, .8);
+  font-size: 18px;
+}
+
+.resource-smart-head {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 30px;
+  padding: 22px 68px 20px 28px;
+  color: #fffaf1;
+  background:
+    radial-gradient(circle at 72% -80%, rgba(199, 132, 98, .45), transparent 42%),
+    linear-gradient(115deg, #213e37, #315b50 72%, #3f665a);
+}
+
+.resource-smart-head div { display: grid; gap: 4px; }
+.resource-smart-head span { color: #e8b49e; font-size: 8px; letter-spacing: 3px; }
+.resource-smart-head h2 { margin: 0; color: #fffaf1; font-size: 23px; font-weight: 500; letter-spacing: 2px; }
+.resource-smart-head p { max-width: 390px; margin: 0; color: rgba(255, 250, 241, .65); font-size: 9px; line-height: 1.6; text-align: right; }
+
+.resource-smart-stages {
+  display: grid;
+  grid-template-columns: auto 1fr auto 1fr auto;
+  align-items: center;
+  gap: 13px;
+  padding: 11px 28px;
+  border-bottom: 1px solid rgba(38, 51, 46, .1);
+  background: #eee7d9;
+}
+
+.resource-smart-stages > div { display: flex; align-items: center; gap: 7px; color: #98988f; }
+.resource-smart-stages b { display: grid; width: 23px; height: 23px; place-items: center; border: 1px solid currentColor; font-size: 7px; font-weight: 500; }
+.resource-smart-stages span { font-size: 9px; letter-spacing: .5px; }
+.resource-smart-stages > i { height: 1px; background: rgba(38, 51, 46, .12); }
+.resource-smart-stages > div.active { color: var(--merchant-red); }
+.resource-smart-stages > div.done { color: var(--merchant-green); }
+.resource-smart-stages > div.done b { background: var(--merchant-green); color: #fffaf1; }
+
+.resource-smart-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1.08fr) minmax(380px, .92fr);
+  min-height: 0;
+}
+
+.resource-entry-pane {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  min-width: 0;
+  padding: 21px 28px 28px;
+  overflow-y: auto;
+  scrollbar-color: rgba(49, 91, 80, .25) transparent;
+  scrollbar-width: thin;
+}
+
+.entry-section-title { display: flex; align-items: center; justify-content: space-between; padding-bottom: 4px; }
+.entry-section-title b { color: var(--merchant-ink); font-size: 13px; font-weight: 600; }
+.entry-section-title span { color: #96958d; font-size: 8px; }
+.resource-smart-modal label > span { color: #58645e; font-size: 9px; font-weight: 600; }
+.resource-smart-modal label > span small { margin-left: 5px; color: #a09a90; font-size: 7px; font-weight: 400; }
+.resource-smart-modal input,
+.resource-smart-modal select,
+.resource-smart-modal textarea {
+  min-height: 36px;
+  border-color: rgba(38, 51, 46, .14);
+  background: rgba(255, 253, 248, .88);
+  font-size: 10px;
+}
+.resource-smart-modal input:focus,
+.resource-smart-modal select:focus,
+.resource-smart-modal textarea:focus { border-color: rgba(49, 91, 80, .6); box-shadow: 0 0 0 2px rgba(49, 91, 80, .06); }
+.resource-smart-modal .poi-search-row button { min-width: 92px; border-radius: 2px; }
+.resource-smart-modal .poi-result-list { position: relative; z-index: 2; margin-top: -7px; border-radius: 2px; }
+.resource-smart-modal .smart-selected-poi { border-radius: 1px; background: rgba(49, 91, 80, .075); }
+.resource-smart-modal .smart-selected-poi span { font-size: 7px; letter-spacing: 2px; }
+.resource-smart-modal .reservation-switch { border-radius: 2px; }
+
+.resource-audit-pane {
+  min-width: 0;
+  padding: 22px 26px 26px;
+  overflow-y: auto;
+  color: #f8f1e5;
+  background:
+    linear-gradient(rgba(255, 255, 255, .025) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, .025) 1px, transparent 1px),
+    radial-gradient(circle at 90% 12%, rgba(194, 116, 83, .23), transparent 28%),
+    #25463e;
+  background-size: 24px 24px, 24px 24px, auto, auto;
+  scrollbar-color: rgba(255, 255, 255, .22) transparent;
+  scrollbar-width: thin;
+}
+
+.audit-pane-head { display: flex; align-items: center; justify-content: space-between; padding-bottom: 14px; border-bottom: 1px solid rgba(255, 255, 255, .12); }
+.audit-pane-head > span { color: #e6b098; font-size: 7px; letter-spacing: 2.5px; }
+.audit-pane-head > b { display: flex; align-items: center; gap: 6px; color: rgba(255, 250, 241, .58); font-size: 8px; font-weight: 500; }
+.audit-pane-head > b::before { width: 6px; height: 6px; content: ''; border-radius: 50%; background: #a4a29b; }
+.audit-pane-head > b.live::before { background: #87be9c; box-shadow: 0 0 0 5px rgba(135, 190, 156, .1); }
+
+.audit-empty-state,
+.audit-scanning { display: grid; justify-items: center; align-content: center; min-height: calc(100% - 38px); padding: 26px 20px; text-align: center; }
+.claw-orbit { position: relative; display: grid; width: 76px; height: 76px; margin-bottom: 22px; place-items: center; border: 1px solid rgba(255, 255, 255, .18); border-radius: 50%; }
+.claw-orbit::before { position: absolute; inset: 8px; content: ''; border: 1px solid rgba(232, 176, 152, .22); border-radius: 50%; }
+.claw-orbit span { z-index: 1; display: grid; width: 42px; height: 42px; place-items: center; border-radius: 50%; background: #b76249; color: #fff7eb; font-size: 18px; }
+.claw-orbit > i { position: absolute; top: -3px; width: 7px; height: 7px; border-radius: 50%; background: #e7b39b; box-shadow: 0 0 16px #e7b39b; }
+.audit-empty-state h3,
+.audit-scanning h3 { margin: 0 0 8px; color: #fffaf1; font-size: 19px; font-weight: 500; letter-spacing: 1px; }
+.audit-empty-state > p,
+.audit-scanning > p { max-width: 330px; color: rgba(255, 250, 241, .62); font-size: 9px; line-height: 1.8; }
+.audit-empty-state ul { display: grid; grid-template-columns: 1fr 1fr; gap: 7px 20px; width: min(340px, 100%); margin: 20px 0 23px; padding: 14px 16px; border-block: 1px solid rgba(255, 255, 255, .1); list-style: none; text-align: left; }
+.audit-empty-state li { color: rgba(255, 250, 241, .75); font-size: 8px; }
+.audit-empty-state li::before { margin-right: 7px; color: #e7b39b; content: '·'; }
+.audit-empty-state > button,
+.apply-audit-button { padding: 10px 17px; border: 1px solid rgba(255, 255, 255, .28); border-radius: 2px; background: transparent; color: #fffaf1; cursor: pointer; font-family: inherit; font-size: 9px; }
+.audit-empty-state > button span,
+.apply-audit-button span { margin-left: 15px; color: #e7b39b; }
+
+.audit-scanning .claw-orbit { animation: audit-pulse 1.6s ease-in-out infinite; }
+.audit-scanning > div:last-child { display: flex; gap: 6px; margin-top: 24px; }
+.audit-scanning > div:last-child i { width: 28px; height: 2px; background: rgba(255, 255, 255, .16); animation: audit-loading 1.2s ease-in-out infinite; }
+.audit-scanning > div:last-child i:nth-child(2) { animation-delay: .18s; }
+.audit-scanning > div:last-child i:nth-child(3) { animation-delay: .36s; }
+
+.audit-result { display: grid; gap: 12px; padding-top: 16px; }
+.audit-score-card { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; padding: 12px 16px; border: 1px solid rgba(255, 255, 255, .12); background: rgba(255, 255, 255, .045); }
+.audit-score-card > div { display: grid; grid-template-columns: 1fr auto; align-items: end; gap: 2px 10px; }
+.audit-score-card span { grid-column: 1 / -1; color: rgba(255, 250, 241, .52); font-size: 7px; letter-spacing: 1px; }
+.audit-score-card b { color: #fffaf1; font-size: 27px; font-weight: 500; line-height: 1; }
+.audit-score-card i { color: rgba(255, 250, 241, .45); font-size: 7px; font-style: normal; }
+.audit-score-card > em { padding: 0 18px; color: #e7b39b; font-size: 16px; font-style: normal; }
+.audit-score-card .projected b { color: #e7b39b; }
+.audit-verdict { padding: 11px 13px; border-left: 3px solid #8fc3a3; background: rgba(143, 195, 163, .08); }
+.audit-verdict.warning { border-left-color: #df9b7d; background: rgba(223, 155, 125, .08); }
+.audit-verdict span { color: #b8ddc5; font-size: 9px; font-weight: 600; }
+.audit-verdict.warning span { color: #efb49a; }
+.audit-verdict p { margin: 4px 0 0; color: rgba(255, 250, 241, .65); font-size: 8px; line-height: 1.65; }
+.audit-check-list { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
+.audit-check-list article { display: grid; grid-template-columns: 24px 1fr; gap: 8px; padding: 9px; border: 1px solid rgba(255, 255, 255, .09); background: rgba(255, 255, 255, .025); }
+.audit-check-list article > i { display: grid; width: 22px; height: 22px; place-items: center; border: 1px solid #84b69a; border-radius: 50%; color: #a9d1b8; font-size: 9px; font-style: normal; }
+.audit-check-list article > i.IMPROVED { border-color: #df9b7d; color: #efb49a; }
+.audit-check-list article > i.WARN { border-color: #dca078; color: #f0b28a; }
+.audit-check-list article div { display: grid; gap: 3px; }
+.audit-check-list b { color: #fffaf1; font-size: 8px; font-weight: 500; }
+.audit-check-list small { color: rgba(255, 250, 241, .5); font-size: 7px; line-height: 1.45; }
+.traveler-preview { overflow: hidden; border: 1px solid rgba(255, 255, 255, .13); background: #f4eee3; color: var(--merchant-ink); }
+.traveler-preview header { display: flex; align-items: center; justify-content: space-between; padding: 8px 11px; border-bottom: 1px solid rgba(38, 51, 46, .08); }
+.traveler-preview header span { color: var(--merchant-red); font-size: 7px; letter-spacing: 1.5px; }
+.traveler-preview header b { color: #768078; font-size: 7px; font-weight: 500; }
+.traveler-preview > div { padding: 11px 13px 13px; }
+.traveler-preview small { color: #9a6e5c; font-size: 7px; }
+.traveler-preview h3 { margin: 4px 0 5px; font-size: 14px; font-weight: 600; }
+.traveler-preview p { display: -webkit-box; overflow: hidden; margin: 0; color: #69716b; font-size: 8px; line-height: 1.6; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.apply-audit-button { justify-self: end; }
+
+.resource-smart-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 13px 20px 13px 28px;
+  border-top: 1px solid rgba(38, 51, 46, .1);
+  background: #ede6d9;
+}
+.resource-smart-footer > label { display: flex; align-items: center; gap: 8px; color: #69726c; cursor: pointer; font-size: 8px; }
+.resource-smart-footer > label input { width: 13px; min-height: 13px; height: 13px; margin: 0; accent-color: var(--merchant-green); }
+.resource-smart-footer > div { display: flex; gap: 8px; }
+.resource-smart-footer button { min-width: 92px; padding: 10px 15px; border: 1px solid rgba(49, 91, 80, .22); border-radius: 2px; background: transparent; color: var(--merchant-green); cursor: pointer; font-family: inherit; font-size: 9px; }
+.resource-smart-footer button[type='submit'] { min-width: 140px; border-color: var(--merchant-green); background: var(--merchant-green); color: #fffaf1; }
+.resource-smart-footer button:disabled { cursor: not-allowed; opacity: .38; }
+
+@keyframes audit-pulse {
+  0%, 100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(231, 179, 155, 0); }
+  50% { transform: scale(1.04); box-shadow: 0 0 0 12px rgba(231, 179, 155, .04); }
+}
+
+@keyframes audit-loading {
+  0%, 100% { background: rgba(255, 255, 255, .12); }
+  50% { background: #e7b39b; }
+}
+
+@media (max-width: 900px) {
+  .resource-modal.resource-smart-modal { height: calc(100vh - 20px); width: calc(100vw - 20px); overflow-y: auto; grid-template-rows: auto auto auto auto; }
+  .resource-smart-body { grid-template-columns: 1fr; }
+  .resource-entry-pane,
+  .resource-audit-pane { overflow: visible; }
+  .resource-audit-pane { min-height: 480px; }
+}
+
+@media (max-width: 620px) {
+  .resource-modal-backdrop { padding: 0; }
+  .resource-modal.resource-smart-modal { width: 100vw; height: 100vh; border: 0; }
+  .resource-smart-head { align-items: start; padding: 18px 54px 17px 18px; }
+  .resource-smart-head p { display: none; }
+  .resource-smart-stages { gap: 7px; padding: 9px 16px; }
+  .resource-smart-stages span { display: none; }
+  .resource-entry-pane { padding: 18px; }
+  .city-name-grid,
+  .resource-smart-modal .modal-grid { grid-template-columns: 1fr; }
+  .resource-audit-pane { min-height: 510px; padding: 20px 18px; }
+  .resource-smart-footer { position: sticky; bottom: 0; display: grid; padding: 11px 14px; }
+  .resource-smart-footer > div { width: 100%; }
+  .resource-smart-footer button { flex: 1; }
+}
+
+@media (max-width: 1100px) {
+  .insight-visual-grid { grid-template-columns: 1fr; }
+  .audience-chart { grid-template-columns: 170px 1fr; }
+}
+
+@media (max-width: 700px) {
+  .insight-kpi-grid { grid-template-columns: 1fr 1fr; }
+  .insight-kpi-grid article:nth-child(2) { border-right: 0; }
+  .insight-kpi-grid article:nth-child(-n + 2) { border-bottom: 1px solid rgba(38, 51, 46, .09); }
+  .interest-chart { grid-template-columns: 1fr; justify-items: center; }
+  .interest-columns { width: 100%; }
+  .audience-chart { grid-template-columns: 135px 1fr; }
+  .citation-chart { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 460px) {
+  .insight-kpi-grid article { min-height: 92px; padding: 14px; }
+  .insight-kpi-grid strong { font-size: 23px; }
+  .interest-visual-card,
+  .audience-visual-card,
+  .citation-visual-card { padding: 17px; }
+  .interest-columns { gap: 5px; }
+  .interest-columns article { grid-template-rows: 110px 25px auto; }
+  .interest-columns article > div { height: 104px; }
+  .audience-chart { grid-template-columns: 1fr; justify-items: center; }
+  .audience-legend { width: 100%; }
+  .citation-chart article { grid-template-columns: 20px minmax(90px, 1fr) 80px 34px; }
 }
 </style>

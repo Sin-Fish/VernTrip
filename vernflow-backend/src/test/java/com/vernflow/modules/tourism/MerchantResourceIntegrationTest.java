@@ -11,6 +11,7 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
 import static org.hamcrest.Matchers.hasItem;
+import static org.hamcrest.Matchers.greaterThanOrEqualTo;
 import static org.hamcrest.Matchers.not;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
@@ -178,6 +179,44 @@ class MerchantResourceIntegrationTest {
                                 }
                                 """))
                 .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void shouldAuditResourceDraftWithoutPretendingFallbackIsAi() throws Exception {
+        String merchantToken = login("merchant", "merchant123");
+
+        mockMvc.perform(post("/api/merchant/resources/audit")
+                        .header("Authorization", "Bearer " + merchantToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "city":"苏州",
+                                  "name":"园林拓印体验",
+                                  "category":"EXPERIENCE",
+                                  "district":"姑苏区",
+                                  "placeName":"苏州博物馆",
+                                  "amapPoiId":"B0TESTPOI",
+                                  "address":"姑苏区东北街204号",
+                                  "longitude":120.627929,
+                                  "latitude":31.324097,
+                                  "summary":"",
+                                  "tags":[],
+                                  "openHours":"09:00-17:00",
+                                  "priceMin":68,
+                                  "priceMax":128,
+                                  "reservationRequired":true,
+                                  "dailyCapacity":20,
+                                  "availableCapacity":8
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.engine").value("LOCAL_RULES"))
+                .andExpect(jsonPath("$.data.currentScore").value(78))
+                .andExpect(jsonPath("$.data.projectedScore", greaterThanOrEqualTo(90)))
+                .andExpect(jsonPath("$.data.recommendable").value(true))
+                .andExpect(jsonPath("$.data.generatedSummary").isNotEmpty())
+                .andExpect(jsonPath("$.data.generatedTags.length()", greaterThanOrEqualTo(3)))
+                .andExpect(jsonPath("$.data.checks.length()").value(4));
     }
 
     @Test

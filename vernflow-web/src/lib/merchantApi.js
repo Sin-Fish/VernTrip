@@ -18,6 +18,10 @@ export function createMerchantResource(resource) {
   return userRequest('/api/merchant/resources', jsonRequest('POST', resource))
 }
 
+export function auditMerchantResource(resource) {
+  return userRequest('/api/merchant/resources/audit', jsonRequest('POST', resource))
+}
+
 export function updateMerchantResource(resourceId, resource) {
   return userRequest(
     `/api/merchant/resources/${resourceId}`,

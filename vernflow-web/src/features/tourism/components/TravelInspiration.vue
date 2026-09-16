@@ -33,6 +33,11 @@ const resourceCounts = computed(() => {
   return { total: resources.value.length, districts: districts.size, verified }
 })
 
+function visualImage(index = 0) {
+  const cityOffset = Math.max(0, cities.indexOf(city.value)) * 2
+  return visualImages[(cityOffset + index) % visualImages.length]
+}
+
 function formatPrice(resource) {
   const minimum = Number(resource?.priceMin ?? 0)
   const maximum = Number(resource?.priceMax ?? 0)
@@ -116,10 +121,6 @@ onBeforeUnmount(() => {
 <template>
   <section class="inspiration-browser" aria-label="真实文旅资源灵感">
     <div class="city-rail">
-      <div>
-        <span>DESTINATION INDEX</span>
-        <p>选择一座城市，读取真实地点</p>
-      </div>
       <nav aria-label="灵感城市">
         <button
           v-for="option in cities"
@@ -129,13 +130,15 @@ onBeforeUnmount(() => {
           :disabled="loading && city === option"
           @click="loadCity(option)"
         >
-          <small>{{ option === city ? 'NOW' : 'CITY' }}</small>
           <b>{{ option }}</b>
         </button>
       </nav>
       <div class="catalog-proof">
-        <span>{{ resourceCounts.total.toString().padStart(2, '0') }}</span>
-        <p>{{ resourceCounts.districts }} 个区域<br />{{ resourceCounts.verified }} 个坐标已核验</p>
+        <span><b>{{ resourceCounts.total }}</b> 个地点</span>
+        <i></i>
+        <span>{{ resourceCounts.districts }} 个区域</span>
+        <i></i>
+        <span>{{ resourceCounts.verified }} 个坐标已核验</span>
       </div>
     </div>
 
@@ -154,43 +157,64 @@ onBeforeUnmount(() => {
 
     <div v-else-if="featured" class="inspiration-layout">
       <article class="featured-place">
-        <img :src="visualImages[0]" alt="城市旅行氛围" />
-        <div class="featured-shade"></div>
-        <div class="featured-number">01</div>
+        <div class="featured-visual">
+          <img :src="visualImage(0)" alt="城市旅行氛围" />
+          <span class="featured-number">01</span>
+          <span class="featured-city">{{ city }} · {{ featured.area || '城市精选' }}</span>
+        </div>
+        <button class="plan-bookmark featured-bookmark" type="button" aria-label="将主推荐加入规划" @click="startPlanning(featured)">
+          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M7 4h10v16l-5-3-5 3z" /></svg>
+          <span>加入规划</span>
+        </button>
         <div class="featured-copy">
+          <div class="featured-index">
+            <span>EDITOR'S PICK</span>
+            <i></i>
+            <b>{{ sourceLabel(featured) }}</b>
+          </div>
           <div class="place-flags">
             <span>{{ featured.type }}</span>
-            <span>{{ featured.area || city }}</span>
-            <span>{{ sourceLabel(featured) }}</span>
+            <span v-for="tag in (featured.tags || []).slice(0, 2)" :key="tag">{{ tag }}</span>
           </div>
-          <p>FEATURED PLACE / {{ city }}</p>
           <h3>{{ featured.name }}</h3>
-          <strong>{{ featured.note }}</strong>
+          <p class="featured-note">{{ featured.note }}</p>
           <div class="featured-actions">
-            <button type="button" @click="openDetails(featured)">查看地点资料</button>
-            <button type="button" @click="startPlanning(featured)">以这里开始规划 <b>→</b></button>
+            <button type="button" @click="openDetails(featured)">查看地点资料 <b>→</b></button>
           </div>
         </div>
       </article>
 
-      <div class="place-grid">
-        <article v-for="(resource, index) in secondary" :key="resource.id" class="place-card">
-          <button class="place-card-main" type="button" @click="openDetails(resource)">
-            <div class="place-card-visual">
-              <img :src="visualImages[(index + 1) % visualImages.length]" alt="" />
-              <span>{{ String(index + 2).padStart(2, '0') }}</span>
-              <mark>{{ resource.type }}</mark>
-            </div>
-            <div class="place-card-copy">
-              <small>{{ resource.area || city }} · {{ sourceLabel(resource) }}</small>
-              <h4>{{ resource.name }}</h4>
-              <p>{{ resource.note }}</p>
-              <div><span>{{ resource.openHours || '开放时间现场为准' }}</span><b>{{ formatPrice(resource) }}</b></div>
-            </div>
-          </button>
-          <button class="place-plan-button" type="button" @click="startPlanning(resource)">加入规划意向 <span>↗</span></button>
-        </article>
-      </div>
+      <section class="more-places">
+        <header>
+          <div>
+            <span>MORE PLACES · {{ city }}</span>
+            <h3>值得停留的地方</h3>
+          </div>
+          <b>{{ String(secondary.length).padStart(2, '0') }}</b>
+        </header>
+
+        <div class="place-grid">
+          <article v-for="(resource, index) in secondary" :key="resource.id" class="place-card">
+            <button class="place-card-main" type="button" @click="openDetails(resource)">
+              <div class="place-card-visual">
+                <img :src="visualImage(index + 1)" alt="" />
+                <span>{{ String(index + 2).padStart(2, '0') }}</span>
+                <mark>{{ resource.type }}</mark>
+              </div>
+              <div class="place-card-copy">
+                <small>{{ resource.area || city }}</small>
+                <h4>{{ resource.name }}</h4>
+                <p>{{ resource.note }}</p>
+                <div><span>{{ resource.openHours || '时间现场为准' }}</span><b>{{ formatPrice(resource) }}</b></div>
+              </div>
+            </button>
+            <button class="plan-bookmark" type="button" :aria-label="`将${resource.name}加入规划`" @click="startPlanning(resource)">
+              <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M7 4h10v16l-5-3-5 3z" /></svg>
+              <span>加入规划</span>
+            </button>
+          </article>
+        </div>
+      </section>
     </div>
 
     <Teleport to="body">
@@ -199,7 +223,7 @@ onBeforeUnmount(() => {
           <aside class="place-detail" aria-label="景点详情">
             <button class="detail-close" type="button" aria-label="关闭景点详情" @click="closeDetails">×</button>
             <div class="detail-visual">
-              <img :src="visualImages[(inspirationResources.indexOf(selectedResource) + visualImages.length) % visualImages.length]" alt="城市旅行氛围" />
+              <img :src="visualImage(inspirationResources.indexOf(selectedResource))" alt="城市旅行氛围" />
               <span>{{ city }} / {{ selectedResource.area }}</span>
             </div>
             <div class="detail-copy">
@@ -280,9 +304,6 @@ onBeforeUnmount(() => {
 .place-card-copy > p { display: -webkit-box; height: 33px; margin: 0; overflow: hidden; color: #727a73; font-size: 9px; line-height: 1.7; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 .place-card-copy > div { display: flex; justify-content: space-between; gap: 8px; margin-top: 9px; color: #7e817a; font-size: 7px; }
 .place-card-copy > div b { color: #315b5a; }
-.place-plan-button { border: 0; border-top: 1px solid rgba(44, 36, 27, .08); background: #eee4d2; color: #315b5a; cursor: pointer; font-family: inherit; font-size: 9px; font-weight: 700; }
-.place-plan-button span { margin-left: 8px; color: #a6533f; }
-
 .inspiration-state { display: grid; min-height: 500px; place-content: center; justify-items: center; gap: 9px; background: rgba(250, 246, 237, .76); color: #315b5a; text-align: center; backdrop-filter: blur(12px); }
 .inspiration-state i { width: 31px; height: 31px; border: 2px solid rgba(49, 91, 90, .17); border-top-color: #315b5a; border-radius: 50%; animation: inspiration-spin .8s linear infinite; }
 .inspiration-state > span { display: grid; width: 32px; height: 32px; place-items: center; border: 1px solid #a6533f; border-radius: 50%; color: #a6533f; }
@@ -342,5 +363,457 @@ onBeforeUnmount(() => {
   .detail-visual { position: relative; height: 270px; }
   .detail-copy { padding: 37px 23px 45px; }
   .detail-actions { grid-template-columns: 1fr; }
+}
+
+/* Editorial travel index redesign. */
+.inspiration-browser {
+  display: grid;
+  gap: 12px;
+}
+
+.city-rail {
+  display: flex;
+  min-height: 40px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  overflow: visible;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+}
+
+.city-rail nav {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.city-rail nav button {
+  display: block;
+  min-width: 74px;
+  padding: 9px 17px;
+  border: 1px solid rgba(44, 36, 27, .14);
+  border-radius: 999px;
+  background: rgba(255, 252, 245, .52);
+  color: #56615c;
+  font-family: 'Noto Serif SC', serif;
+  transition: color .22s ease, border-color .22s ease, background .22s ease;
+}
+
+.city-rail nav button:hover {
+  border-color: rgba(49, 91, 90, .42);
+  background: rgba(255, 252, 245, .88);
+}
+
+.city-rail nav button.active {
+  border-color: #315b5a;
+  background: #315b5a;
+  color: #fffaf1;
+}
+
+.city-rail nav b {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 1px;
+}
+
+.catalog-proof {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0;
+  background: transparent;
+  color: #737970;
+  white-space: nowrap;
+}
+
+.catalog-proof > span {
+  color: inherit;
+  font: 400 9px/1.2 'Noto Serif SC', serif;
+  letter-spacing: .5px;
+}
+
+.catalog-proof > span b {
+  color: #315b5a;
+  font: 600 14px/1 Georgia, serif;
+}
+
+.catalog-proof i {
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: #b56c53;
+}
+
+.inspiration-layout {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 18px;
+}
+
+.featured-place {
+  position: relative;
+  top: auto;
+  display: block;
+  height: clamp(290px, 20vw, 340px);
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid rgba(44, 36, 27, .12);
+  border-radius: 2px;
+  background: #20362f;
+  box-shadow: 0 18px 50px rgba(47, 55, 48, .1);
+}
+
+.featured-visual {
+  position: absolute;
+  inset: 0;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  padding: 0;
+  border: 0;
+  background: #20362f;
+}
+
+.featured-visual::after {
+  position: absolute;
+  inset: 0;
+  content: '';
+  background:
+    linear-gradient(90deg, rgba(19, 39, 33, .9) 0%, rgba(19, 39, 33, .66) 37%, rgba(19, 39, 33, .1) 72%),
+    linear-gradient(0deg, rgba(18, 37, 31, .65), transparent 64%);
+}
+
+.featured-visual img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform .8s cubic-bezier(.2, .7, .2, 1);
+}
+
+.featured-place:hover .featured-visual img {
+  transform: scale(1.025);
+}
+
+.featured-number {
+  position: absolute;
+  z-index: 3;
+  top: 22px;
+  right: 24px;
+  left: auto;
+  color: #fffaf1;
+  font: 600 12px/1 Georgia, serif;
+  letter-spacing: 1px;
+  text-shadow: 0 2px 10px rgba(0, 0, 0, .3);
+}
+
+.featured-city {
+  position: absolute;
+  z-index: 3;
+  right: 24px;
+  bottom: 22px;
+  color: #fffaf1;
+  font-size: 10px;
+  letter-spacing: 1.5px;
+}
+
+.featured-copy {
+  position: absolute;
+  z-index: 2;
+  inset: 0 auto 0 0;
+  display: flex;
+  width: min(610px, 68%);
+  padding: 25px 34px 24px;
+  color: #fffaf1;
+  flex-direction: column;
+  justify-content: flex-end;
+}
+
+.featured-index {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 11px;
+  color: #e0a283;
+  font: 700 8px/1 Georgia, serif;
+  letter-spacing: 1.7px;
+}
+
+.featured-index i {
+  width: 34px;
+  height: 1px;
+  background: rgba(255, 250, 241, .34);
+}
+
+.featured-index b {
+  color: rgba(255, 250, 241, .68);
+  font: 500 8px/1 'Noto Serif SC', serif;
+  letter-spacing: .5px;
+}
+
+.place-flags {
+  gap: 6px;
+  margin: 0 0 8px;
+}
+
+.place-flags span {
+  padding: 4px 8px;
+  border: 1px solid rgba(255, 250, 241, .28);
+  color: rgba(255, 250, 241, .86);
+  font-size: 8px;
+  letter-spacing: .5px;
+}
+
+.featured-copy h3 {
+  margin: 0;
+  color: #fffaf1;
+  font-family: 'Noto Serif SC', serif;
+  font-size: clamp(23px, 2vw, 28px);
+  font-weight: 600;
+  letter-spacing: -1px;
+  line-height: 1.25;
+}
+
+.featured-copy > .featured-note {
+  display: -webkit-box;
+  margin: 8px 0 0;
+  overflow: hidden;
+  color: rgba(255, 250, 241, .76);
+  font: 400 10px/1.7 'Noto Serif SC', serif;
+  letter-spacing: .2px;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.featured-actions {
+  display: block;
+  margin-top: 14px;
+}
+
+.featured-actions button {
+  width: 150px;
+  min-height: 34px;
+  padding: 0 13px;
+  border: 1px solid rgba(255, 250, 241, .55);
+  background: rgba(255, 250, 241, .08);
+  color: #fffaf1;
+  font-size: 9px;
+}
+
+.featured-actions button:last-child {
+  border-color: rgba(255, 250, 241, .55);
+  background: rgba(255, 250, 241, .08);
+  color: #fffaf1;
+}
+
+.more-places {
+  display: grid;
+  gap: 10px;
+}
+
+.more-places > header {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba(44, 36, 27, .14);
+}
+
+.more-places > header span {
+  color: #a6533f;
+  font: 700 8px/1 Georgia, serif;
+  letter-spacing: 1.7px;
+}
+
+.more-places > header h3 {
+  margin: 4px 0 0;
+  color: #263c35;
+  font-family: 'Noto Serif SC', serif;
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: 1px;
+}
+
+.more-places > header > b {
+  color: rgba(49, 91, 90, .3);
+  font: 500 24px/1 Georgia, serif;
+}
+
+.place-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.place-card {
+  position: relative;
+  display: block;
+  min-height: 260px;
+  overflow: hidden;
+  border: 1px solid rgba(44, 36, 27, .11);
+  border-top: 0;
+  border-radius: 2px;
+  background: rgba(255, 252, 246, .91);
+  box-shadow: 0 12px 28px rgba(62, 60, 50, .06);
+  animation: place-card-arrive .55s both;
+}
+
+.place-card:nth-child(2) { animation-delay: .07s; }
+.place-card:nth-child(3) { animation-delay: .14s; }
+.place-card:nth-child(4) { animation-delay: .21s; }
+.place-card:nth-child(5) { animation-delay: .28s; }
+.place-card:nth-child(6) { animation-delay: .35s; }
+
+.place-card-main {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  grid-template-rows: clamp(185px, 13vw, 220px) 1fr;
+}
+
+.place-card-visual {
+  border-top: 3px solid #315b5a;
+}
+
+.place-card-visual > span {
+  top: 14px;
+  right: 14px;
+  left: auto;
+}
+
+.place-card-visual mark {
+  right: 12px;
+  bottom: 11px;
+  padding: 5px 8px;
+  background: rgba(250, 246, 237, .94);
+  color: #315b5a;
+}
+
+.place-card-copy {
+  padding: 12px 15px 10px;
+}
+
+.place-card-copy > small {
+  color: #a6533f;
+  font-size: 8px;
+  letter-spacing: .8px;
+}
+
+.place-card-copy h4 {
+  margin: 6px 0;
+  color: #253d36;
+  font-size: 15px;
+}
+
+.place-card-copy > p {
+  height: 17px;
+  color: #727a73;
+  font-size: 9px;
+  line-height: 1.7;
+  -webkit-line-clamp: 1;
+}
+
+.place-card-copy > div {
+  margin-top: 7px;
+  color: #8a8e87;
+  font-size: 8px;
+}
+
+.plan-bookmark {
+  position: absolute;
+  z-index: 4;
+  top: 0;
+  left: 15px;
+  display: flex;
+  width: 38px;
+  height: 41px;
+  align-items: center;
+  gap: 7px;
+  overflow: hidden;
+  padding: 0 11px;
+  border: 0;
+  border-radius: 0 0 10px 10px;
+  background: #ad5f49;
+  color: #fffaf1;
+  cursor: pointer;
+  font-family: 'Noto Serif SC', serif;
+  box-shadow: 0 7px 18px rgba(79, 47, 38, .2);
+  transition: width .28s cubic-bezier(.2, .8, .2, 1), background .2s ease, box-shadow .2s ease;
+}
+
+.plan-bookmark svg {
+  width: 16px;
+  min-width: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linejoin: round;
+  stroke-width: 1.6;
+}
+
+.plan-bookmark span {
+  max-width: 0;
+  overflow: hidden;
+  opacity: 0;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .5px;
+  white-space: nowrap;
+  transition: max-width .28s ease, opacity .18s ease .05s;
+}
+
+.plan-bookmark:hover,
+.plan-bookmark:focus-visible {
+  width: 105px;
+  background: #954c39;
+  box-shadow: 0 9px 22px rgba(79, 47, 38, .28);
+}
+
+.plan-bookmark:hover span,
+.plan-bookmark:focus-visible span {
+  max-width: 58px;
+  opacity: 1;
+}
+
+.featured-bookmark {
+  left: 22px;
+}
+
+.inspiration-state {
+  min-height: 420px;
+  border: 1px solid rgba(44, 36, 27, .1);
+  background: rgba(250, 246, 237, .7);
+}
+
+@keyframes place-card-arrive {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@media (max-width: 1050px) {
+  .city-rail { display: grid; }
+  .city-rail nav { overflow-x: auto; }
+  .catalog-proof { justify-self: start; }
+  .featured-place { grid-template-columns: 1.05fr .95fr; }
+  .featured-copy { padding: 28px; }
+  .place-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .place-card-main { grid-template-rows: 190px 1fr; }
+}
+
+@media (max-width: 720px) {
+  .city-rail { gap: 12px; }
+  .city-rail nav { display: flex; grid-template-columns: none; width: 100%; padding-bottom: 4px; }
+  .city-rail nav button { min-width: 68px; min-height: auto; padding: 8px 14px; }
+  .catalog-proof { display: none; }
+  .featured-place { height: 390px; }
+  .featured-visual { height: 100%; min-height: 0; }
+  .featured-copy { width: 100%; }
+  .featured-copy { padding: 25px 21px 27px; }
+  .featured-copy h3 { font-size: 26px; }
+  .place-grid { grid-template-columns: 1fr; }
+  .place-card-main { grid-template-rows: 220px 1fr; }
+  .more-places > header h3 { font-size: 19px; }
 }
 </style>
