@@ -21,6 +21,16 @@ export default defineConfig(({ mode }) => {
         "/api": {
           target: apiProxyTarget,
           changeOrigin: true,
+          configure(proxy) {
+            proxy.on("error", (_error, _request, response) => {
+              if (!response.writeHead || response.headersSent || response.writableEnded) return;
+              response.writeHead(503, { "Content-Type": "application/json; charset=utf-8" });
+              response.end(JSON.stringify({
+                success: false,
+                message: "旅行服务暂时无法连接，请稍后重试。",
+              }));
+            });
+          },
         },
       },
     },

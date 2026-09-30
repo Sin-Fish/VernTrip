@@ -4,6 +4,9 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.vernflow.integration.amap.AmapPoiClient;
 import com.vernflow.integration.amap.AmapPoiClient.AmapPoi;
+import com.vernflow.modules.tourism.service.TravelFortuneService;
+import com.vernflow.modules.tourism.dto.FortuneProfileRequest;
+import com.vernflow.modules.user.repository.AppUserRepository;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -59,6 +62,33 @@ class TourismPlanningIntegrationTest {
 
     @MockBean
     private AmapPoiClient amapPoiClient;
+
+    @Autowired
+    private TravelFortuneService fortuneService;
+
+    @Autowired
+    private AppUserRepository users;
+
+    @Test
+    void shouldKeepFortunePreferencesSeparateForEachAccount() {
+        Long touristId = users.findByUsernameIgnoreCase("demo").orElseThrow().getId();
+        Long merchantId = users.findByUsernameIgnoreCase("merchant").orElseThrow().getId();
+        fortuneService.saveProfile(touristId, new FortuneProfileRequest(List.of("摄影"), List.of("北京")));
+        fortuneService.saveProfile(merchantId, new FortuneProfileRequest(List.of("徒步"), List.of("杭州")));
+        assertThat(fortuneService.profile(touristId).interests()).containsExactly("摄影");
+        assertThat(fortuneService.profile(touristId).visitedCities()).containsExactly("北京");
+        assertThat(fortuneService.profile(merchantId).interests()).containsExactly("徒步");
+        assertThat(fortuneService.profile(merchantId).visitedCities()).containsExactly("杭州");
+    }
+
+    @Test
+    void shouldRejectFortuneWithoutInterestsOrWithPastDate() throws Exception {
+        mockMvc.perform(post("/api/tourism/fortune").contentType(MediaType.APPLICATION_JSON).content("""
+                {"preferences":{"interests":[],"visitedCities":[]},"date":"2000-01-01","days":2,
+                 "travelers":"朋友结伴","budget":3000,"pace":"轻松一些","exploreNew":true}
+                """))
+                .andExpect(status().isBadRequest());
+    }
 
     @Test
     void shouldExtractConversationIntoAReadyTravelDraft() throws Exception {

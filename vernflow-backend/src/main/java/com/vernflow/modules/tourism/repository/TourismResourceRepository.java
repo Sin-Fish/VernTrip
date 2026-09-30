@@ -8,6 +8,14 @@ import java.util.List;
 
 public interface TourismResourceRepository extends JpaRepository<TourismResource, Long> {
 
+    interface DestinationFact {
+        String getCity();
+        String getName();
+        String getTagsJson();
+    }
+
+    List<DestinationFact> findByStatusOrderByCityAscIdAsc(TourismResource.PublicationStatus status);
+
     List<TourismResource> findAllByOrderByUpdatedAtDesc();
 
     boolean existsByCityIgnoreCaseAndNameIgnoreCase(String city, String name);

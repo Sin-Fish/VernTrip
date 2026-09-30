@@ -2,12 +2,20 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { listTourismResources } from '@/lib/travelApi'
+import AttractionRanking from './AttractionRanking.vue'
+import AttractionVideoModal from './AttractionVideoModal.vue'
+import SmartRecommendation from './SmartRecommendation.vue'
+import { discoveryViews } from '../data/attractionShowcase'
 
 const router = useRouter()
-const cities = ['杭州', '苏州', '南京', '成都', '厦门']
+const primaryCities = ['杭州', '苏州', '南京', '成都', '厦门']
+const moreCities = ['北京', '上海', '西安', '重庆', '广州', '青岛', '长沙', '武汉', '昆明', '大理', '泉州', '洛阳']
+const cities = [...primaryCities, ...moreCities]
 const city = ref('杭州')
 const resources = ref([])
 const selectedResource = ref(null)
+const videoResource = ref(null)
+const activeView = ref('featured')
 const loading = ref(false)
 const errorMessage = ref('')
 let loadSequence = 0
@@ -38,6 +46,16 @@ function visualImage(index = 0) {
   return visualImages[(cityOffset + index) % visualImages.length]
 }
 
+function resourceImage(resource, fallbackIndex = 0) {
+  const index = inspirationResources.value.findIndex((item) => item.id === resource?.id)
+  return visualImage(index >= 0 ? index : fallbackIndex)
+}
+
+function guideImages(resource) {
+  const index = Math.max(0, inspirationResources.value.findIndex((item) => item.id === resource?.id))
+  return [visualImage(index), visualImage(index + 1), visualImage(index + 2)]
+}
+
 function formatPrice(resource) {
   const minimum = Number(resource?.priceMin ?? 0)
   const maximum = Number(resource?.priceMax ?? 0)
@@ -54,10 +72,14 @@ function availabilityLabel(resource) {
 }
 
 function sourceLabel(resource) {
+  if (resource?.source === '城市展示样例') return '城市精选样例'
   return resource?.source?.includes('高德') ? '高德动态 POI' : '已审核文旅资源'
 }
 
 function amapUrl(resource) {
+  if (!Number.isFinite(Number(resource.longitude)) || !Number.isFinite(Number(resource.latitude))) {
+    return `https://uri.amap.com/search?keyword=${encodeURIComponent(resource.placeName || resource.name)}&city=${encodeURIComponent(city.value)}&src=verntrip&callnative=0`
+  }
   const position = `${resource.longitude},${resource.latitude}`
   return `https://uri.amap.com/marker?position=${encodeURIComponent(position)}&name=${encodeURIComponent(resource.placeName || resource.name)}&src=verntrip&coordinate=gaode&callnative=0`
 }
@@ -72,6 +94,7 @@ function plannerQuery(resource) {
 
 function startPlanning(resource) {
   selectedResource.value = null
+  videoResource.value = null
   router.push({ name: 'travel-planner', query: plannerQuery(resource) })
 }
 
@@ -83,16 +106,33 @@ function closeDetails() {
   selectedResource.value = null
 }
 
+function openVideo(resource) {
+  selectedResource.value = null
+  videoResource.value = resource
+}
+
+function closeVideo() {
+  videoResource.value = null
+}
+
+function selectMoreCity(event) {
+  const nextCity = event.target.value
+  if (nextCity) loadCity(nextCity)
+}
+
 async function loadCity(nextCity = city.value) {
   const sequence = ++loadSequence
   city.value = nextCity
   loading.value = true
+  resources.value = []
   errorMessage.value = ''
   selectedResource.value = null
+  videoResource.value = null
   try {
     const result = await listTourismResources(nextCity)
     if (sequence !== loadSequence) return
-    resources.value = Array.isArray(result) ? result : []
+    const apiResources = Array.isArray(result) ? result : []
+    resources.value = apiResources
     if (!resources.value.length) errorMessage.value = '这座城市暂时没有可展示的文旅资源。'
   } catch (error) {
     if (sequence !== loadSequence) return
@@ -104,7 +144,7 @@ async function loadCity(nextCity = city.value) {
 }
 
 function handleKeydown(event) {
-  if (event.key === 'Escape') closeDetails()
+  if (event.key === 'Escape' && !videoResource.value) closeDetails()
 }
 
 onMounted(() => {
@@ -121,9 +161,9 @@ onBeforeUnmount(() => {
 <template>
   <section class="inspiration-browser" aria-label="真实文旅资源灵感">
     <div class="city-rail">
-      <nav aria-label="灵感城市">
+      <nav v-if="activeView !== 'recommendation'" class="city-options" aria-label="灵感城市">
         <button
-          v-for="option in cities"
+          v-for="option in primaryCities"
           :key="option"
           :class="{ active: city === option }"
           type="button"
@@ -132,8 +172,29 @@ onBeforeUnmount(() => {
         >
           <b>{{ option }}</b>
         </button>
+        <label class="more-city-select" :class="{ active: moreCities.includes(city) }">
+          <select aria-label="选择更多城市" :value="moreCities.includes(city) ? city : ''" @change="selectMoreCity">
+            <option disabled value="">更多城市</option>
+            <option v-for="option in moreCities" :key="option" :value="option">{{ option }}</option>
+          </select>
+          <span>{{ moreCities.includes(city) ? city : '更多城市' }}</span>
+          <i></i>
+        </label>
       </nav>
-      <div class="catalog-proof">
+      <div class="discovery-tabs" aria-label="灵感浏览方式" role="tablist">
+        <button
+          v-for="view in discoveryViews"
+          :key="view.value"
+          :class="{ active: activeView === view.value }"
+          type="button"
+          role="tab"
+          :aria-selected="activeView === view.value"
+          @click="activeView = view.value"
+        >
+          <small>{{ view.index }}</small>{{ view.label }}
+        </button>
+      </div>
+      <div v-if="activeView !== 'recommendation'" class="catalog-proof">
         <span><b>{{ resourceCounts.total }}</b> 个地点</span>
         <i></i>
         <span>{{ resourceCounts.districts }} 个区域</span>
@@ -142,7 +203,11 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <div v-if="loading" class="inspiration-state">
+    <SmartRecommendation
+      v-if="activeView === 'recommendation'"
+    />
+
+    <div v-else-if="loading" class="inspiration-state">
       <i></i>
       <b>正在翻阅{{ city }}的地方资料</b>
       <p>高德 POI 与文旅资源库正在同步。</p>
@@ -155,12 +220,13 @@ onBeforeUnmount(() => {
       <button type="button" @click="loadCity(city)">重新读取</button>
     </div>
 
-    <div v-else-if="featured" class="inspiration-layout">
+    <div v-else-if="featured && activeView === 'featured'" class="inspiration-layout">
       <article class="featured-place">
         <div class="featured-visual">
           <img :src="visualImage(0)" alt="城市旅行氛围" />
           <span class="featured-number">01</span>
           <span class="featured-city">{{ city }} · {{ featured.area || '城市精选' }}</span>
+          <button class="featured-play" type="button" @click="openVideo(featured)"><i></i><span>AI 视频导览</span></button>
         </div>
         <button class="plan-bookmark featured-bookmark" type="button" aria-label="将主推荐加入规划" @click="startPlanning(featured)">
           <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M7 4h10v16l-5-3-5 3z" /></svg>
@@ -212,10 +278,21 @@ onBeforeUnmount(() => {
               <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M7 4h10v16l-5-3-5 3z" /></svg>
               <span>加入规划</span>
             </button>
+            <button class="card-video" type="button" :aria-label="`观看${resource.name}视频导览`" @click="openVideo(resource)"><i></i><span>视频导览</span></button>
           </article>
         </div>
       </section>
     </div>
+
+    <AttractionRanking
+      v-else-if="featured && activeView === 'ranking'"
+      :city="city"
+      :image-for="resourceImage"
+      :resources="resources"
+      @details="openDetails"
+      @plan="startPlanning"
+      @video="openVideo"
+    />
 
     <Teleport to="body">
       <Transition name="place-drawer">
@@ -239,7 +316,7 @@ onBeforeUnmount(() => {
                 <div><dt>开放时间</dt><dd>{{ selectedResource.openHours || '以现场公告为准' }}</dd></div>
                 <div><dt>参考花费</dt><dd>{{ formatPrice(selectedResource) }}</dd></div>
                 <div><dt>预约状态</dt><dd>{{ availabilityLabel(selectedResource) }}</dd></div>
-                <div><dt>坐标状态</dt><dd>{{ selectedResource.locationStatus === 'VERIFIED' ? '高德坐标已核验' : '近似坐标' }}</dd></div>
+                <div><dt>坐标状态</dt><dd>{{ selectedResource.locationStatus === 'VERIFIED' ? '高德坐标已核验' : selectedResource.locationStatus === 'DEMO' ? '待接入坐标' : '近似坐标' }}</dd></div>
               </dl>
               <div class="detail-source">
                 <span>数据来源</span>
@@ -247,6 +324,7 @@ onBeforeUnmount(() => {
               </div>
               <div class="detail-actions">
                 <a :href="amapUrl(selectedResource)" target="_blank" rel="noopener noreferrer">在高德地图查看</a>
+                <button type="button" @click="openVideo(selectedResource)">AI 视频导览</button>
                 <button type="button" @click="startPlanning(selectedResource)">以这里开始规划 <span>→</span></button>
               </div>
             </div>
@@ -254,15 +332,21 @@ onBeforeUnmount(() => {
         </div>
       </Transition>
     </Teleport>
+
+    <AttractionVideoModal
+      v-if="videoResource"
+      :city="city"
+      :images="guideImages(videoResource)"
+      :resource="videoResource"
+      @close="closeVideo"
+      @plan="startPlanning"
+    />
   </section>
 </template>
 
 <style scoped>
 .inspiration-browser { display: grid; gap: 20px; }
 .city-rail { display: grid; grid-template-columns: 200px minmax(0, 1fr) 170px; align-items: stretch; min-height: 84px; overflow: hidden; border-top: 3px solid #315b5a; background: rgba(250, 246, 237, .82); box-shadow: 0 12px 32px rgba(62, 60, 50, .06); backdrop-filter: blur(12px); }
-.city-rail > div:first-child { display: grid; align-content: center; gap: 5px; padding: 16px 20px; border-right: 1px solid rgba(44, 36, 27, .1); }
-.city-rail > div:first-child span { color: #a6533f; font: 700 8px/1 Georgia, serif; letter-spacing: 1.5px; }
-.city-rail > div:first-child p { margin: 0; color: #66736c; font-size: 10px; }
 .city-rail nav { display: grid; grid-template-columns: repeat(5, minmax(80px, 1fr)); }
 .city-rail nav button { display: grid; align-content: center; justify-items: center; gap: 5px; border: 0; border-right: 1px solid rgba(44, 36, 27, .08); background: transparent; color: #5e665f; cursor: pointer; font-family: 'Noto Serif SC', serif; transition: .25s ease; }
 .city-rail nav button:hover { background: rgba(49, 91, 90, .06); color: #315b5a; }
@@ -344,7 +428,6 @@ onBeforeUnmount(() => {
 
 @media (max-width: 1050px) {
   .city-rail { grid-template-columns: 1fr 150px; }
-  .city-rail > div:first-child { display: none; }
   .inspiration-layout { grid-template-columns: 1fr; }
   .featured-place { position: relative; top: 0; min-height: 520px; }
 }
@@ -815,5 +898,226 @@ onBeforeUnmount(() => {
   .place-grid { grid-template-columns: 1fr; }
   .place-card-main { grid-template-rows: 220px 1fr; }
   .more-places > header h3 { font-size: 19px; }
+}
+
+/* Discovery modes and video entry points. */
+.city-rail {
+  gap: 18px;
+}
+
+.city-options {
+  flex: 0 1 auto;
+}
+
+.more-city-select {
+  position: relative;
+  display: flex;
+  min-width: 92px;
+  min-height: 36px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 0 14px;
+  border: 1px solid rgba(44, 36, 27, .14);
+  border-radius: 999px;
+  background: rgba(255, 252, 245, .52);
+  color: #56615c;
+  cursor: pointer;
+  font-family: 'Noto Serif SC', serif;
+  font-size: 11px;
+  white-space: nowrap;
+  transition: color .22s ease, border-color .22s ease, background .22s ease;
+}
+
+.more-city-select:hover,
+.more-city-select:focus-within {
+  border-color: rgba(49, 91, 90, .42);
+  background: rgba(255, 252, 245, .88);
+}
+
+.more-city-select.active {
+  border-color: #315b5a;
+  background: #315b5a;
+  color: #fffaf1;
+}
+
+.more-city-select select {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.more-city-select i {
+  width: 0;
+  height: 0;
+  border-top: 4px solid currentColor;
+  border-right: 4px solid transparent;
+  border-left: 4px solid transparent;
+}
+
+.discovery-tabs {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  margin-left: auto;
+  padding: 3px;
+  border: 1px solid rgba(49, 91, 90, .13);
+  border-radius: 999px;
+  background: rgba(255, 252, 245, .48);
+}
+
+.discovery-tabs button {
+  display: flex;
+  min-height: 31px;
+  align-items: center;
+  gap: 7px;
+  padding: 0 13px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: #68736e;
+  cursor: pointer;
+  font-family: 'Noto Serif SC', serif;
+  font-size: 9px;
+  white-space: nowrap;
+  transition: background .2s ease, color .2s ease;
+}
+
+.discovery-tabs button small {
+  color: #b1674f;
+  font: 600 7px/1 Georgia, serif;
+}
+
+.discovery-tabs button.active {
+  background: #315b5a;
+  color: #fffaf1;
+}
+
+.discovery-tabs button.active small {
+  color: #e7ad89;
+}
+
+.featured-play {
+  position: absolute;
+  z-index: 4;
+  top: 50%;
+  right: 11%;
+  display: grid;
+  width: 82px;
+  height: 82px;
+  place-content: center;
+  justify-items: center;
+  gap: 8px;
+  border: 1px solid rgba(255, 250, 241, .58);
+  border-radius: 50%;
+  background: rgba(22, 46, 39, .28);
+  color: #fffaf1;
+  cursor: pointer;
+  transform: translateY(-50%);
+  backdrop-filter: blur(8px);
+  transition: background .25s ease, transform .25s ease;
+}
+
+.featured-play:hover {
+  background: rgba(177, 91, 67, .78);
+  transform: translateY(-50%) scale(1.05);
+}
+
+.featured-play i,
+.featured-actions i,
+.card-video i {
+  width: 0;
+  height: 0;
+  border-top: 6px solid transparent;
+  border-bottom: 6px solid transparent;
+  border-left: 10px solid currentColor;
+}
+
+.featured-play span {
+  font-size: 8px;
+  letter-spacing: .5px;
+}
+
+.featured-actions {
+  display: flex;
+  gap: 7px;
+}
+
+.featured-actions button {
+  display: flex;
+  width: auto;
+  min-width: 138px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.featured-actions i {
+  border-top-width: 4px;
+  border-bottom-width: 4px;
+  border-left-width: 7px;
+}
+
+.card-video {
+  position: absolute;
+  z-index: 4;
+  top: 145px;
+  left: 13px;
+  display: flex;
+  min-height: 31px;
+  align-items: center;
+  gap: 7px;
+  padding: 0 10px;
+  border: 1px solid rgba(255,255,255,.55);
+  background: rgba(27, 53, 46, .7);
+  color: #fffaf1;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 8px;
+  backdrop-filter: blur(7px);
+}
+
+.card-video i {
+  border-top-width: 4px;
+  border-bottom-width: 4px;
+  border-left-width: 7px;
+}
+
+.detail-actions {
+  grid-template-columns: 1fr 1fr 1.2fr;
+}
+
+@media (max-width: 1220px) {
+  .catalog-proof { display: none; }
+}
+
+@media (max-width: 1050px) {
+  .city-rail { display: flex; overflow-x: auto; padding-bottom: 3px; }
+  .city-options { overflow: visible !important; }
+  .discovery-tabs { flex: 0 0 auto; }
+  .featured-play { right: 7%; }
+}
+
+@media (max-width: 720px) {
+  .city-rail { display: grid; overflow: visible; }
+  .city-options { overflow-x: auto !important; }
+  .more-city-select { min-width: 82px; min-height: 33px; padding: 0 12px; }
+  .discovery-tabs { width: 100%; margin-left: 0; }
+  .discovery-tabs button { flex: 1; justify-content: center; }
+  .featured-play { top: 24px; right: 22px; width: 62px; height: 62px; transform: none; }
+  .featured-play:hover { transform: scale(1.04); }
+  .featured-play span { display: none; }
+  .featured-actions { display: grid; grid-template-columns: 1fr 1fr; }
+  .featured-actions button { min-width: 0; }
+  .card-video { top: 174px; }
+  .detail-actions { grid-template-columns: 1fr; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .featured-play,
+  .featured-visual img,
+  .place-card-visual img { transition: none; }
 }
 </style>

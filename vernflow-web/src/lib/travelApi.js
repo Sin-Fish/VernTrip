@@ -10,17 +10,24 @@ function jsonRequest(method, body) {
   };
 }
 
-export function createTravelPlan(request) {
-  return userRequest("/api/tourism/trips/plan", jsonRequest("POST", {
+export function createTravelPlan(request, options = {}) {
+  return userRequest("/api/tourism/trips/plan", { ...jsonRequest("POST", {
     ...request,
     days: Number(request.days),
     budget: Number(request.budget),
-  }));
+  }), signal: options.signal });
 }
 
 export function listTourismResources(city) {
   const params = new URLSearchParams({ city });
   return userRequest(`/api/tourism/resources?${params.toString()}`);
+}
+
+export function recommendTourismResources(request) {
+  return userRequest("/api/tourism/recommendations", jsonRequest("POST", {
+    ...request,
+    budget: Number(request.budget),
+  }));
 }
 
 export function adjustTravelPlan(planId, adjustment) {
@@ -48,4 +55,16 @@ export function removeSavedTravelPlan(planId) {
 
 export function listSavedTravelPlans() {
   return userRequest("/api/tourism/plans");
+}
+
+export function getFortuneProfile() {
+  return userRequest("/api/tourism/fortune/profile");
+}
+
+export function saveFortuneProfile(preferences) {
+  return userRequest("/api/tourism/fortune/profile", jsonRequest("PUT", preferences));
+}
+
+export function drawTravelFortune(request, options = {}) {
+  return userRequest("/api/tourism/fortune", { ...jsonRequest("POST", request), signal: options.signal });
 }
