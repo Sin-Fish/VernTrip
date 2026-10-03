@@ -7,7 +7,12 @@ VernFlow 是一个面向资料工作区的可审计智能体系统。当前仓�
 - `vernflow-backend`：Spring Boot 后端
 - `vernflow-ai`：FastAPI AI 子服务
 
-建议先按本文的“快速启动”流程完成本地联调，再根据需要查看 PostgreSQL、Docker 和正式部署部分。
+此外，游客对话助手支持 OpenClaw 引擎（可选，见 [1.7 完整模式](#17-完整模式openclaw-助手引擎可选)）：
+
+- `openclaw-runtime`：VernTrip OpenClaw 插件、Skills 与本地运行环境
+- `scripts/openclaw`：OpenClaw 安装、启动、状态与停止脚本
+
+建议先按本文的"快速启动"流程完成本地联调，再根据需要查看 PostgreSQL、Docker 和正式部署部分。
 
 ## 1. 快速启动
 
@@ -53,7 +58,30 @@ Copy-Item .env.example .env.local
 
 **平时改配置，优先改根目录 `.env.local`。**
 
-### 1.4 启动 AI 子服务
+### 1.4 启动方式一：使用仓库脚本（推荐）
+
+仓库提供三个开发启动脚本，分别在新终端中运行：
+
+```powershell
+# 终端 1：AI 子服务（强制 hash 轻量 embedding，跳过模型下载）
+.\scripts\start-vernflow-ai-dev.cmd
+
+# 终端 2：后端（使用独立 Gradle 依赖缓存 .gradle-home-rag）
+.\scripts\start-vernflow-backend-dev.cmd
+
+# 终端 3：用户前台（显式绑定 http://127.0.0.1:5173）
+.\scripts\start-vernflow-web-dev.cmd
+```
+
+说明：
+
+- AI 脚本调用系统 `python`，要求已按 [1.5.1](#151-ai-子服务) 安装依赖；如需真实 embedding 模型，改用手动方式启动 AI
+- 管理后台暂无对应脚本，按 [1.5.4](#154-管理员后台) 手动启动
+- 该方式不启动 OpenClaw 助手引擎，游客对话助手运行在内置 legacy 引擎上；需要完整助手功能见 [1.7](#17-完整模式openclaw-助手引擎可选)
+
+### 1.5 启动方式二：手动启动
+
+#### 1.5.1 AI 子服务
 
 ```powershell
 cd vernflow-ai
@@ -67,7 +95,7 @@ py -3 -m venv .venv
 
 - [http://localhost:8000/ai/health](http://localhost:8000/ai/health)
 
-### 1.5 启动后端
+#### 1.5.2 后端
 
 新开一个终端，回到仓库根目录：
 
@@ -83,8 +111,9 @@ $env:GRADLE_USER_HOME = "$PWD\\.gradle-home"
 - 该模式适合本地快速联调
 - `h2` 模式不需要你先安装 PostgreSQL
 - 第一次运行会下载 Gradle 和 Maven 依赖，时间可能较长
+- 如根目录 `.env` 已配置 `DB_URL`（PostgreSQL），则无需设置 `SPRING_PROFILES_ACTIVE=h2`，直接启动即可
 
-### 1.6 启动用户前台
+#### 1.5.3 用户前台
 
 新开一个终端：
 
@@ -98,7 +127,7 @@ npm run dev
 
 - [http://localhost:5173](http://localhost:5173)
 
-### 1.7 启动管理员后台
+#### 1.5.4 管理员后台
 
 再开一个终端：
 
@@ -112,7 +141,7 @@ npm run dev
 
 - [http://localhost:5174](http://localhost:5174)
 
-### 1.8 登录账号
+### 1.6 登录账号
 
 用户前台：
 
@@ -123,9 +152,43 @@ npm run dev
 
 - `admin / admin123`
 
-### 1.9 推荐启动顺序
+### 1.7 完整模式：OpenClaw 助手引擎（可选）
 
-建议按下面顺序启动：
+游客对话助手默认运行在后端内置的 legacy 引擎上。如需完整助手功能（OpenClaw 插件 + Skills），按以下流程启动：
+
+第一次使用先完成一次性安装（项目本地 Node 24、OpenClaw 2026.7.1、VernTrip 插件与 Skills）：
+
+```powershell
+.\scripts\openclaw\install.ps1
+```
+
+然后启动后端与 OpenClaw Gateway：
+
+```powershell
+.\scripts\openclaw\start-stack.ps1
+```
+
+说明：
+
+- Gateway 监听 http://127.0.0.1:18789 ，健康检查 http://127.0.0.1:18789/healthz
+- 后端以 `ASSISTANT_ENGINE=openclaw` 启动，Gateway 或模型不可用时自动降级，不影响其他功能
+- 引擎可切换：`-AssistantEngine shadow`（旧助手为主，请求旁路影子采样对比）、`-AssistantEngine legacy`（无迁移回退旧助手）
+- Gateway 令牌自动生成并保存在 `openclaw-runtime/state/runtime-secrets.json`，不进入仓库也不写入 `.env`
+
+日常管理：
+
+```powershell
+.\scripts\openclaw\status.ps1          # 查看 Gateway 运行状态
+.\scripts\openclaw\backend-status.ps1  # 查看后端运行状态
+.\scripts\openclaw\stop-stack.ps1      # 停止后端与 Gateway
+.\scripts\openclaw\stop.ps1            # 只停止 Gateway
+```
+
+完整施工与验收标准见 `docs/openclaw嵌入/OpenClaw嵌入施工方案.md`。
+
+### 1.8 推荐启动顺序
+
+最小联调建议按下面顺序启动：
 
 1. `vernflow-ai`
 2. `vernflow-backend`
@@ -133,6 +196,14 @@ npm run dev
 4. `vernflow-admin`
 
 如果只是本地开发或比赛演示，先按这套流程跑通即可。
+
+完整模式（含 OpenClaw）则按下面的顺序：
+
+1. 完成 [1.7](#17-完整模式openclaw-助手引擎可选) 的一次性安装
+2. 启动 `vernflow-ai`
+3. 启动后端与 Gateway（`start-stack.ps1`）
+4. 启动 `vernflow-web`
+5. 启动 `vernflow-admin`
 
 ## 2. 配置文件怎么用
 
@@ -180,6 +251,21 @@ Copy-Item .env.example .env.local
 | `DB_URL`                | 数据库连接             |
 | `DB_USERNAME`           | 数据库用户名           |
 | `DB_PASSWORD`           | 数据库密码             |
+
+### 2.5 功能相关配置项
+
+以下变量控制地图、助手引擎与账号行为，完整清单见 `.env.example`：
+
+| 变量                                          | 用途                                    | 默认值                   |
+| --------------------------------------------- | --------------------------------------- | ------------------------ |
+| `ASSISTANT_ENGINE`                            | 游客对话助手引擎：`legacy` / `shadow` / `openclaw` | `legacy`        |
+| `OPENCLAW_BASE_URL`                           | 后端访问 OpenClaw Gateway 的地址        | `http://127.0.0.1:18789` |
+| `OPENCLAW_AGENT_ID`                           | OpenClaw Agent 标识                     | `verntrip-main`          |
+| `RAG_PROFILE`                                 | RAG 检索配置名                          | `tfidf_topk_basic`       |
+| `ADMIN_USERNAME` / `ADMIN_PASSWORD`           | 管理后台登录账号                        | `admin` / `admin123`     |
+| `USER_AUTH_REQUIRED`                          | 用户前台是否强制登录                    | `true`                   |
+| `VITE_AMAP_JS_KEY` / `VITE_AMAP_SECURITY_CODE` | 高德地图 JS API Key 与安全密钥          | 空                       |
+| `AMAP_WEB_SERVICE_KEY`                        | 高德 Web 服务 Key（按城市动态补充 POI） | 空                       |
 
 ## 3. 两种本地运行方式
 
@@ -256,7 +342,22 @@ RAG_EMBEDDING_MODEL=intfloat/multilingual-e5-small
 RAG_EMBEDDING_BACKEND=hash
 ```
 
-这样会更轻量。
+这样会更轻量。仓库脚本 `scripts/start-vernflow-ai-dev.cmd` 已默认使用该轻量模式。
+
+### 4.3 AI 视频生成
+
+游客端（景点详情"生成 AI 视频"）与商家端（智能内容工作室"AI 视频生成"）支持两种生成方式：
+
+- **AI 成片（默认，免费）**：AI 读取景点已核验事实撰写分镜解说词（DeepSeek，无 Key 时按类型模板兜底）→ 神经语音合成配音（edge-tts）→ 真实图片素材运镜/转场/字幕自动剪辑合成（ffmpeg）。约 1 分钟出一条，零成本
+- **可灵真 AI 视频（可选）**：在 [kling.ai/dev/api-key](https://kling.ai/dev/api-key) 申请 API Key 后填入根目录 `.env.local`：
+
+```env
+KLING_API_KEY=你的key
+```
+
+配置了 Key 时任务自动走可灵真动态视频（异步 1-5 分钟，720p 约 $0.112/秒）；未配置时自动走免费的 AI 成片。生成视频统一转存到 `MEDIA_DIR`（默认 `./storage/media`）并通过本地地址播放。
+
+相关配置：`KLING_BASE_URL`（默认 `https://api-singapore.klingai.com`）、`KLING_TIMEOUT`（默认 60s）、`MEDIA_DIR`。AI 成片依赖 `edge-tts` 与 `imageio-ffmpeg`（已加入 `vernflow-ai/requirements.txt`），配音需要联网调用微软 TTS 服务，失败时自动降级为无配音版本。
 
 ## 5. Docker 方式
 
@@ -378,6 +479,11 @@ npm run build
 说明数据库环境没有正确提供 `pgvector`。
 通常可直接使用仓库自带的 Docker Compose 环境。
 
+### 7.5 游客对话助手功能不完整
+
+快速启动流程（未启动 OpenClaw Gateway）时，后端运行在 legacy 旧助手引擎上，这是预期行为。
+需要完整助手功能请按 [1.7](#17-完整模式openclaw-助手引擎可选) 完成 OpenClaw 安装与启动；Gateway 或模型不可用时后端会自动降级，不影响其他功能。
+
 ## 8. 常用命令
 
 运行后端测试：
@@ -390,6 +496,15 @@ npm run build
 
 ```powershell
 Invoke-WebRequest -Uri http://localhost:8000/ai/health -UseBasicParsing
+```
+
+OpenClaw 助手引擎（详见 [1.7](#17-完整模式openclaw-助手引擎可选)）：
+
+```powershell
+.\scripts\openclaw\install.ps1     # 一次性安装
+.\scripts\openclaw\start-stack.ps1 # 启动后端 + Gateway
+.\scripts\openclaw\status.ps1      # 查看 Gateway 状态
+.\scripts\openclaw\stop-stack.ps1  # 停止后端 + Gateway
 ```
 
 停止 Docker Compose：

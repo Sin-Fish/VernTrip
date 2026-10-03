@@ -4,3 +4,6 @@ numpy>=2.0.0
 scikit-learn>=1.5.0
 pypdf>=6.0.0
 sentence-transformers>=3.0.0
+# AI 成片（视频合成）：edge-tts 免费神经语音合成；imageio-ffmpeg 自带 ffmpeg 二进制
+edge-tts>=7.0.0
+imageio-ffmpeg>=0.5.0

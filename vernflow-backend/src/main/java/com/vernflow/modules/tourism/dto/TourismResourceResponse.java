@@ -23,6 +23,7 @@ public record TourismResourceResponse(
         boolean reservationRequired,
         Integer availableCapacity,
         String availabilityStatus,
-        List<String> tags
+        List<String> tags,
+        String videoUrl
 ) {
 }

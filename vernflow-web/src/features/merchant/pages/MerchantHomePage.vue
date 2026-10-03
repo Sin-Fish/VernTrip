@@ -7,14 +7,19 @@ import {
   createMerchantProduct,
   createMerchantResource,
   generateMerchantContent,
+  generateMerchantVideo,
   getMerchantDashboard,
   listMerchantProducts,
   listMerchantResources,
+  listMerchantVideos,
   updateMerchantProduct,
   updateMerchantProductStatus,
   updateMerchantResource,
   updateMerchantResourceStatus,
 } from '@/lib/merchantApi'
+import { getVideoTask, videoFileUrl } from '@/lib/travelApi'
+import { imageToBase64 } from '@/lib/imageToBase64'
+import { useVideoTaskPolling } from '@/composables/useVideoTaskPolling'
 import { loadAmap, searchAmapPois } from '@/lib/amapPoi'
 
 const router = useRouter()
@@ -130,6 +135,19 @@ const contentResult = ref('')
 const contentFacts = ref([])
 const contentEngine = ref('')
 const contentGeneratedAt = ref('')
+
+const { task: videoTask, polling: videoPolling, start: startVideoPolling, stop: stopVideoPolling } = useVideoTaskPolling(getVideoTask)
+const videoForm = reactive({
+  durationSeconds: 5,
+  aspectRatio: '16:9',
+  resolution: '720p',
+  promptHint: '',
+})
+const videoHistory = ref([])
+const videoHistoryLoading = ref(false)
+const videoGenerating = computed(() => ['PENDING', 'PROCESSING'].includes(videoTask.value?.status))
+const videoTaskError = ref('')
+const videoVisuals = ['/images/banner1.jpg', '/images/banner2.jpg', '/images/banner3.jpg']
 const newResource = reactive({
   city: '杭州',
   name: '',
@@ -513,6 +531,67 @@ async function copyGeneratedContent() {
   }
 }
 
+async function generateVideo() {
+  if (videoGenerating.value) return
+  if (!contentForm.sourceId) {
+    showToast('请先选择用于生成视频的资源或产品')
+    return
+  }
+  videoTaskError.value = ''
+  try {
+    const images = await Promise.all(videoVisuals.map((source) => imageToBase64(source)))
+    const task = await generateMerchantVideo({
+      sourceType: contentForm.sourceType,
+      sourceId: contentForm.sourceId,
+      durationSeconds: Number(videoForm.durationSeconds),
+      aspectRatio: videoForm.aspectRatio,
+      resolution: videoForm.resolution,
+      promptHint: videoForm.promptHint.trim() || null,
+      images,
+    })
+    if (task.status === 'FAILED') {
+      videoTaskError.value = task.errorMessage || '视频生成失败，请稍后重试。'
+      showToast(videoTaskError.value)
+      return
+    }
+    showToast('视频任务已提交，AI 成片正在生成…')
+    startVideoPolling(task)
+  } catch (error) {
+    videoTaskError.value = error.message || '视频任务创建失败，请稍后重试。'
+    showToast(videoTaskError.value)
+  }
+}
+
+async function loadVideoHistory() {
+  videoHistoryLoading.value = true
+  try {
+    videoHistory.value = await listMerchantVideos()
+  } catch {
+    videoHistory.value = []
+  } finally {
+    videoHistoryLoading.value = false
+  }
+}
+
+function videoStatusLabel(status) {
+  return { PENDING: '排队中', PROCESSING: '生成中', SUCCEEDED: '已完成', FAILED: '失败' }[status] ?? status
+}
+
+function previewHistoryVideo(item) {
+  stopVideoPolling()
+  videoTask.value = item
+  videoTaskError.value = ''
+}
+
+watch(() => videoTask.value?.status, (status) => {
+  if (status === 'SUCCEEDED') {
+    showToast('AI 视频生成完成')
+    loadVideoHistory()
+  } else if (status === 'FAILED') {
+    videoTaskError.value = videoTask.value?.errorMessage || '视频生成失败，请重试。'
+  }
+})
+
 function resetProductForm() {
   Object.assign(productForm, {
     id: null,
@@ -698,7 +777,7 @@ async function logout() {
 onMounted(async () => {
   try {
     await hydrateUserProfile()
-    await Promise.all([loadResources(), loadDashboard(), loadProducts()])
+    await Promise.all([loadResources(), loadDashboard(), loadProducts(), loadVideoHistory()])
   } catch {
     // The shared request layer redirects invalid sessions to login.
   }
@@ -889,6 +968,50 @@ onMounted(async () => {
             <div v-else class="content-placeholder"><strong>尚未生成内容</strong></div>
             <details v-if="contentFacts.length"><summary>查看本次使用的 {{ contentFacts.length }} 条可信事实</summary><ul><li v-for="fact in contentFacts" :key="fact">{{ fact }}</li></ul></details>
             <footer><span>{{ contentEngine || 'OPENCLAW' }}<template v-if="contentGeneratedAt"> · {{ new Date(contentGeneratedAt).toLocaleString('zh-CN') }}</template></span><b>人工确认 · 未发布</b></footer>
+          </article>
+        </div>
+
+        <div class="module-intro video-intro"><div><span>AI VIDEO STUDIO</span><h2>AI 视频生成</h2></div><span class="openclaw-badge">{{ videoPolling ? 'GENERATING' : 'AI 成片' }}</span></div>
+        <div class="video-studio-grid">
+          <form @submit.prevent="generateVideo">
+            <label><span>视频依据</span><select v-model="contentForm.sourceType"><option value="RESOURCE">单项文旅资源</option><option value="PRODUCT">旅游产品</option></select></label>
+            <label><span>选择{{ contentForm.sourceType === 'PRODUCT' ? '产品' : '资源' }}</span><select v-model="contentForm.sourceId"><option v-for="source in contentSources" :key="source.id" :value="source.id">{{ source.label }}</option></select></label>
+            <label><span>视频时长</span><select v-model.number="videoForm.durationSeconds"><option :value="3">3 秒</option><option :value="5">5 秒</option><option :value="10">10 秒</option><option :value="15">15 秒</option></select></label>
+            <label><span>画面比例</span><select v-model="videoForm.aspectRatio"><option value="16:9">16:9 横屏</option><option value="9:16">9:16 竖屏</option><option value="1:1">1:1 方形</option></select></label>
+            <label><span>清晰度</span><select v-model="videoForm.resolution"><option value="720p">720P 标准</option><option value="1080p">1080P 高清</option></select></label>
+            <label><span>补充提示词（可选）</span><textarea v-model.trim="videoForm.promptHint" rows="2" placeholder="例如：突出夜游场景与亲子互动"></textarea></label>
+            <button type="submit" :disabled="videoGenerating">{{ videoGenerating ? 'AI 成片正在生成…' : '生成 AI 视频 →' }}</button>
+          </form>
+          <article class="video-result">
+            <div><span>AI VIDEO</span><a v-if="videoTask?.status === 'SUCCEEDED'" :href="videoFileUrl(videoTask.id)" download>下载视频</a></div>
+            <template v-if="videoTask?.status === 'SUCCEEDED'">
+              <video :src="videoFileUrl(videoTask.id)" controls playsinline></video>
+              <p class="video-result-meta">
+                任务 #{{ videoTask.id }} · {{ videoTask.resolution }} · {{ videoTask.aspectRatio }} · {{ videoTask.durationSeconds }}s
+                <template v-if="videoTask.provider === 'LOCAL'"> · AI 成片</template>
+                <template v-else-if="videoTask.provider === 'KLING'"> · 可灵真视频</template>
+              </p>
+            </template>
+            <template v-else-if="videoGenerating">
+              <div class="video-placeholder generating"><i></i><strong>AI 成片正在生成视频</strong><span>解说词撰写、配音与剪辑合成中，通常 1 分钟左右完成</span></div>
+            </template>
+            <template v-else-if="videoTaskError || videoTask?.status === 'FAILED'">
+              <div class="video-placeholder error"><strong>视频生成失败</strong><span>{{ videoTaskError || videoTask?.errorMessage || '请稍后重试' }}</span></div>
+            </template>
+            <div v-else class="video-placeholder"><strong>尚未生成视频</strong><span>基于已审核的资源或产品事实生成宣传视频</span></div>
+            <div class="video-history">
+              <header><span>历史视频</span><b v-if="videoHistoryLoading">加载中…</b></header>
+              <ul v-if="videoHistory.length">
+                <li v-for="item in videoHistory" :key="item.id">
+                  <i :class="`status-${item.status.toLowerCase()}`"></i>
+                  <b>任务 #{{ item.id }} · {{ videoStatusLabel(item.status) }}</b>
+                  <span>{{ item.durationSeconds }}s · {{ item.aspectRatio }}<template v-if="item.provider === 'LOCAL'"> · AI 成片</template><template v-else-if="item.provider === 'KLING'"> · 可灵</template></span>
+                  <em>{{ new Date(item.createdAt).toLocaleString('zh-CN') }}</em>
+                  <button v-if="item.status === 'SUCCEEDED'" type="button" @click="previewHistoryVideo(item)">预览</button>
+                </li>
+              </ul>
+              <p v-else-if="!videoHistoryLoading" class="video-history-empty">暂无历史视频任务</p>
+            </div>
           </article>
         </div>
       </section>
@@ -1281,6 +1404,49 @@ onMounted(async () => {
 .content-result details ul { display: grid; gap: 5px; margin: 10px 0 0; padding-left: 17px; line-height: 1.6; }
 .content-result footer { display: flex; justify-content: space-between; margin-top: auto; padding-top: 12px; border-top: 1px solid rgba(38, 51, 46, .08); color: #858a83; font-size: 8px; }
 .content-result footer b { color: var(--merchant-red); font-weight: 500; }
+
+.video-intro { margin-top: 26px; }
+.video-studio-grid { display: grid; grid-template-columns: minmax(280px, .62fr) minmax(0, 1.38fr); gap: 14px; }
+.video-studio-grid form, .video-result { padding: 22px; border: 1px solid rgba(38, 51, 46, .09); border-radius: 14px; background: rgba(252, 250, 245, .82); }
+.video-studio-grid form { display: grid; align-content: start; gap: 15px; }
+.video-studio-grid label { display: grid; gap: 6px; }
+.video-studio-grid label > span { color: #70766f; font-size: 9px; }
+.video-studio-grid select, .video-studio-grid textarea { width: 100%; padding: 10px; border: 1px solid rgba(38, 51, 46, .13); border-radius: 8px; outline: 0; background: rgba(255, 255, 255, .6); color: var(--merchant-ink); font-family: inherit; font-size: 10px; }
+.video-studio-grid textarea { resize: vertical; line-height: 1.6; }
+.video-studio-grid form > button { margin-top: 6px; padding: 11px; border: 0; border-radius: 8px; background: var(--merchant-green); color: #fffaf1; cursor: pointer; font-family: inherit; font-size: 10px; }
+.video-studio-grid form > button:disabled { cursor: wait; opacity: .6; }
+.video-result { display: flex; min-height: 420px; flex-direction: column; background: linear-gradient(145deg, rgba(255, 252, 246, .94), rgba(235, 226, 210, .75)); }
+.video-result > div:first-child { display: flex; align-items: center; justify-content: space-between; }
+.video-result > div:first-child > span { color: var(--merchant-red); font-size: 9px; letter-spacing: 3px; }
+.video-result > div:first-child > a { color: var(--merchant-green); font-size: 9px; }
+.video-result > video { width: 100%; margin-top: 16px; border-radius: 10px; background: #1c2b26; aspect-ratio: 16 / 9; }
+.video-result-meta { margin: 8px 0 0; color: #70766f; font-size: 9px; }
+.video-placeholder { display: grid; place-items: start; gap: 8px; margin-top: 16px; padding: 22px; border: 1px dashed rgba(49, 91, 80, .15); border-radius: 10px; color: #81857f; }
+.video-placeholder strong { color: var(--merchant-green); font-size: 13px; }
+.video-placeholder span { font-size: 9px; line-height: 1.7; }
+.video-placeholder.generating i { width: 26px; height: 26px; border: 2px solid rgba(49, 91, 80, .18); border-top-color: var(--merchant-green); border-radius: 50%; animation: video-spin .9s linear infinite; }
+.video-placeholder.error strong { color: var(--merchant-red); }
+.video-history { margin-top: 18px; padding-top: 13px; border-top: 1px solid rgba(38, 51, 46, .08); }
+.video-history > header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; color: #858a83; font-size: 8px; }
+.video-history > header span { color: var(--merchant-green); letter-spacing: 1px; }
+.video-history ul { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.video-history li { display: grid; grid-template-columns: 10px 1fr auto auto auto; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 8px; background: rgba(255, 255, 255, .55); font-size: 9px; }
+.video-history li i { width: 8px; height: 8px; border-radius: 50%; background: #c3c1ba; }
+.video-history li i.status-succeeded { background: var(--merchant-green); }
+.video-history li i.status-failed { background: var(--merchant-red); }
+.video-history li i.status-pending, .video-history li i.status-processing { background: #d3a35f; }
+.video-history li b { color: #4d5953; font-weight: 500; }
+.video-history li span { color: #858a83; }
+.video-history li em { color: #9ba09a; font-style: normal; }
+.video-history li button { border: 0; border-bottom: 1px solid currentColor; background: transparent; color: var(--merchant-green); cursor: pointer; font-family: inherit; font-size: 9px; }
+.video-history-empty { margin: 0; color: #9ba09a; font-size: 9px; }
+@keyframes video-spin { to { transform: rotate(360deg); } }
+
+@media (max-width: 980px) {
+  .video-studio-grid { grid-template-columns: 1fr; }
+  .video-history li { grid-template-columns: 10px 1fr auto; }
+  .video-history li em { display: none; }
+}
 
 .insight-grid { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(310px, .8fr); gap: 14px; }
 .trend-card, .portrait-card { padding: 22px; border: 1px solid rgba(38, 51, 46, .09); border-radius: 14px; background: rgba(252, 250, 245, .82); }

@@ -46,4 +46,18 @@ public class AsyncConfiguration {
         executor.initialize();
         return executor;
     }
+
+    /**
+     * AI 成片合成任务线程池（单任务耗时 30-60 秒）。
+     */
+    @Bean(name = "videoTaskExecutor")
+    public Executor videoTaskExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setThreadNamePrefix("video-task-");
+        executor.setCorePoolSize(2);
+        executor.setMaxPoolSize(4);
+        executor.setQueueCapacity(16);
+        executor.initialize();
+        return executor;
+    }
 }

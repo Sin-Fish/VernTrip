@@ -24,7 +24,8 @@ public class UserAuthFilter extends OncePerRequestFilter {
             "/api/finder",
             "/api/assistant",
             "/api/workbench",
-            "/api/merchant"
+            "/api/merchant",
+            "/api/me"
     );
 
     private static final List<String> INTERNAL_PREFIXES = List.of(

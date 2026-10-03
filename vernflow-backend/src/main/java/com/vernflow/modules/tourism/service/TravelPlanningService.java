@@ -58,6 +58,7 @@ public class TravelPlanningService {
     private final OpenClawItineraryService openClawItineraryService;
     private final OpenClawProperties openClawProperties;
     private final DynamicTourismCatalogService dynamicTourismCatalogService;
+    private final VideoGenerationService videoGenerationService;
 
     public TravelPlanningService(
             UserAuthService userAuthService,
@@ -69,7 +70,8 @@ public class TravelPlanningService {
             ObjectMapper objectMapper,
             OpenClawItineraryService openClawItineraryService,
             OpenClawProperties openClawProperties,
-            DynamicTourismCatalogService dynamicTourismCatalogService
+            DynamicTourismCatalogService dynamicTourismCatalogService,
+            VideoGenerationService videoGenerationService
     ) {
         this.userAuthService = userAuthService;
         this.tourismResourceRepository = tourismResourceRepository;
@@ -81,13 +83,18 @@ public class TravelPlanningService {
         this.openClawItineraryService = openClawItineraryService;
         this.openClawProperties = openClawProperties;
         this.dynamicTourismCatalogService = dynamicTourismCatalogService;
+        this.videoGenerationService = videoGenerationService;
     }
 
     @Transactional
     public List<TourismResourceResponse> listResources(String city) {
         String targetCity = StringUtils.hasText(city) ? city.trim() : SUPPORTED_CITY;
-        return dynamicTourismCatalogService.resourcesFor(targetCity).stream()
-                .map(this::toResourceResponse)
+        List<TourismResource> resources = dynamicTourismCatalogService.resourcesFor(targetCity);
+        Map<Long, String> videoUrls = videoGenerationService.latestSucceededVideoUrls(
+                resources.stream().map(TourismResource::getId).filter(Objects::nonNull).distinct().toList()
+        );
+        return resources.stream()
+                .map(resource -> toResourceResponse(resource, videoUrls.get(resource.getId())))
                 .toList();
     }
 
@@ -787,7 +794,7 @@ public class TravelPlanningService {
                 .distinct()
                 .map(resourceMap::get)
                 .filter(Objects::nonNull)
-                .map(this::toResourceResponse)
+                .map(resource -> toResourceResponse(resource, null))
                 .toList();
 
         return new TravelPlanResponse(
@@ -847,7 +854,7 @@ public class TravelPlanningService {
         );
     }
 
-    private TourismResourceResponse toResourceResponse(TourismResource resource) {
+    private TourismResourceResponse toResourceResponse(TourismResource resource, String videoUrl) {
         return new TourismResourceResponse(
                 resource.getId(),
                 categoryLabel(resource.getCategory()),
@@ -868,7 +875,8 @@ public class TravelPlanningService {
                 resource.isReservationRequired(),
                 resource.getAvailableCapacity(),
                 availabilityStatus(resource),
-                readList(resource.getTagsJson())
+                readList(resource.getTagsJson()),
+                videoUrl
         );
     }
 

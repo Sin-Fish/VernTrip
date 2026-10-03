@@ -24,6 +24,8 @@
 server:
   port: ${SERVER_PORT:8080}
   address: 0.0.0.0
+  tomcat:
+    max-http-post-size: ${MAX_HTTP_POST_SIZE:10MB}
 
 management:
   endpoints:
@@ -45,6 +47,12 @@ app:
   storage:
     paper-upload-dir: ${PAPER_UPLOAD_DIR:./storage/papers}
     workspace-root-dir: ${WORKSPACE_ROOT_DIR:./storage/workspace}
+    media-dir: ${MEDIA_DIR:./storage/media}
+  kling:
+    base-url: ${KLING_BASE_URL:https://api-singapore.klingai.com}
+    api-key: ${KLING_API_KEY:}
+    timeout: ${KLING_TIMEOUT:60s}
+    mock-delay: ${KLING_MOCK_DELAY:8s}
   ai:
     base-url: ${AI_SERVICE_BASE_URL:http://localhost:8000}
     timeout: ${AI_SERVICE_TIMEOUT:180s}

@@ -65,3 +65,14 @@ export function updateMerchantProductStatus(productId, status) {
 export function generateMerchantContent(request) {
   return userRequest('/api/merchant/content/generate', jsonRequest('POST', request))
 }
+
+export function generateMerchantVideo(request) {
+  return userRequest(
+    '/api/merchant/videos/generate',
+    jsonRequest('POST', { ...request, durationSeconds: Number(request.durationSeconds) }),
+  )
+}
+
+export function listMerchantVideos() {
+  return userRequest('/api/merchant/videos')
+}

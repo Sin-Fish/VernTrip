@@ -9,6 +9,7 @@ from .api.v1.embeddings import router as embeddings_router
 from .api.v1.planning import router as planning_router
 from .api.v1.rag import router as rag_router
 from .api.v1.summary import router as summary_router
+from .api.v1.video_synthesis import router as video_synthesis_router
 from .core.settings import get_settings
 from .modules.rag.embeddings.local_dense_encoder import embed_texts_with_metadata
 
@@ -54,3 +55,4 @@ app.include_router(summary_router)
 app.include_router(rag_router)
 app.include_router(planning_router)
 app.include_router(embeddings_router)
+app.include_router(video_synthesis_router)

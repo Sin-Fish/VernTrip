@@ -68,3 +68,18 @@ export function saveFortuneProfile(preferences) {
 export function drawTravelFortune(request, options = {}) {
   return userRequest("/api/tourism/fortune", { ...jsonRequest("POST", request), signal: options.signal });
 }
+
+export function generateResourceVideo(resourceId, request) {
+  return userRequest(
+    "/api/me/videos",
+    jsonRequest("POST", { ...request, resourceId, durationSeconds: Number(request.durationSeconds) }),
+  );
+}
+
+export function getVideoTask(taskId) {
+  return userRequest(`/api/me/video-tasks/${taskId}`);
+}
+
+export function videoFileUrl(taskId) {
+  return `/api/tourism/videos/${taskId}/file`;
+}

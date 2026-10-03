@@ -1,7 +1,9 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { listTourismResources } from '@/lib/travelApi'
+import { generateResourceVideo, getVideoTask, listTourismResources } from '@/lib/travelApi'
+import { imageToBase64 } from '@/lib/imageToBase64'
+import { useVideoTaskPolling } from '@/composables/useVideoTaskPolling'
 import AttractionRanking from './AttractionRanking.vue'
 import AttractionVideoModal from './AttractionVideoModal.vue'
 import SmartRecommendation from './SmartRecommendation.vue'
@@ -19,6 +21,11 @@ const activeView = ref('featured')
 const loading = ref(false)
 const errorMessage = ref('')
 let loadSequence = 0
+
+const { task: videoTask, polling: videoPolling, start: startVideoPolling, stop: stopVideoPolling } = useVideoTaskPolling(getVideoTask)
+const generatingForId = ref(null)
+const videoTaskError = ref('')
+const videoGenerating = computed(() => ['PENDING', 'PROCESSING'].includes(videoTask.value?.status))
 
 const visualImages = [
   '/images/banner1.jpg',
@@ -115,6 +122,44 @@ function closeVideo() {
   videoResource.value = null
 }
 
+async function onGenerateVideo(resource) {
+  if (videoGenerating.value) return
+  videoTaskError.value = ''
+  if (resource.videoUrl) {
+    openVideo(resource)
+    return
+  }
+  generatingForId.value = resource.id
+  try {
+    const images = await Promise.all(guideImages(resource).map((source) => imageToBase64(source)))
+    const task = await generateResourceVideo(resource.id, {
+      durationSeconds: 5,
+      aspectRatio: '16:9',
+      resolution: '720p',
+      images,
+    })
+    if (task.status === 'FAILED') {
+      videoTaskError.value = task.errorMessage || '视频生成失败，请稍后重试。'
+      generatingForId.value = null
+      return
+    }
+    startVideoPolling(task)
+  } catch (error) {
+    videoTaskError.value = error.message || '视频任务创建失败，请稍后重试。'
+    generatingForId.value = null
+  }
+}
+
+watch(() => videoTask.value?.status, (status) => {
+  if (status !== 'SUCCEEDED') return
+  const target = resources.value.find((item) => item.id === generatingForId.value)
+  if (target) target.videoUrl = videoTask.value.videoUrl
+  if (selectedResource.value && selectedResource.value.id === generatingForId.value) {
+    openVideo({ ...selectedResource.value, videoUrl: videoTask.value.videoUrl })
+  }
+  generatingForId.value = null
+})
+
 function selectMoreCity(event) {
   const nextCity = event.target.value
   if (nextCity) loadCity(nextCity)
@@ -128,6 +173,9 @@ async function loadCity(nextCity = city.value) {
   errorMessage.value = ''
   selectedResource.value = null
   videoResource.value = null
+  stopVideoPolling()
+  generatingForId.value = null
+  videoTaskError.value = ''
   try {
     const result = await listTourismResources(nextCity)
     if (sequence !== loadSequence) return
@@ -325,8 +373,24 @@ onBeforeUnmount(() => {
               <div class="detail-actions">
                 <a :href="amapUrl(selectedResource)" target="_blank" rel="noopener noreferrer">在高德地图查看</a>
                 <button type="button" @click="openVideo(selectedResource)">AI 视频导览</button>
+                <button
+                  class="generate-video"
+                  type="button"
+                  :disabled="videoGenerating"
+                  @click="onGenerateVideo(selectedResource)"
+                >
+                  {{ videoGenerating ? '视频生成中…' : (selectedResource.videoUrl ? '播放 AI 视频' : '生成 AI 视频') }}
+                </button>
                 <button type="button" @click="startPlanning(selectedResource)">以这里开始规划 <span>→</span></button>
               </div>
+              <p v-if="videoGenerating" class="video-task-status">
+                AI 成片正在生成（约 1 分钟），完成后将自动播放
+                <template v-if="videoTask?.provider === 'KLING'">· 可灵真视频</template>
+              </p>
+              <p v-else-if="videoTask?.status === 'FAILED'" class="video-task-status error">
+                {{ videoTask.errorMessage || '视频生成失败，请重试。' }}
+              </p>
+              <p v-else-if="videoTaskError" class="video-task-status error">{{ videoTaskError }}</p>
             </div>
           </aside>
         </div>
@@ -1086,7 +1150,28 @@ onBeforeUnmount(() => {
 }
 
 .detail-actions {
-  grid-template-columns: 1fr 1fr 1.2fr;
+  grid-template-columns: 1fr 1fr 1fr 1.3fr;
+}
+
+.detail-actions .generate-video:disabled {
+  cursor: wait;
+  opacity: .75;
+}
+
+.video-task-status {
+  margin: 10px 0 0;
+  padding: 9px 11px;
+  border-left: 3px solid #315b5a;
+  background: rgba(49, 91, 90, .07);
+  color: #315b5a;
+  font-size: 9px;
+  line-height: 1.7;
+}
+
+.video-task-status.error {
+  border-left-color: #a6533f;
+  background: rgba(166, 83, 63, .07);
+  color: #a6533f;
 }
 
 @media (max-width: 1220px) {
