@@ -16,6 +16,9 @@ let sceneTimer
 const scenes = computed(() => buildGuideScenes(props.resource, props.city))
 const sceneImages = computed(() => props.images.length ? props.images : ['/images/banner1.jpg'])
 const progress = computed(() => ((activeScene.value + 1) / scenes.value.length) * 100)
+// 视频模式：有真实视频时隐藏轮播 UI 层（字幕卡/播放条/遮罩），
+// 避免遮挡视频自带字幕与原生播放控件，保证可交互。
+const isVideoMode = computed(() => Boolean(props.resource?.videoUrl))
 
 function advanceScene() {
   activeScene.value = (activeScene.value + 1) % scenes.value.length
@@ -23,6 +26,7 @@ function advanceScene() {
 
 function startTimer() {
   window.clearInterval(sceneTimer)
+  if (isVideoMode.value) return
   if (isPlaying.value) sceneTimer = window.setInterval(advanceScene, 4200)
 }
 
@@ -38,7 +42,7 @@ function selectScene(index) {
 
 function handleKeydown(event) {
   if (event.key === 'Escape') emit('close')
-  if (event.key === ' ') {
+  if (event.key === ' ' && !isVideoMode.value) {
     event.preventDefault()
     togglePlayback()
   }
@@ -80,17 +84,17 @@ onBeforeUnmount(() => {
               />
             </TransitionGroup>
           </template>
-          <div class="guide-shade"></div>
+          <div v-if="!isVideoMode" class="guide-shade"></div>
           <header>
-            <span>AI VIDEO GUIDE</span>
+            <span>{{ isVideoMode ? 'AI VIDEO' : 'AI VIDEO GUIDE' }}</span>
             <button type="button" aria-label="关闭视频导览" @click="emit('close')">×</button>
           </header>
-          <div class="guide-caption">
+          <div v-if="!isVideoMode" class="guide-caption">
             <span>{{ scenes[activeScene].kicker }}</span>
             <h2>{{ scenes[activeScene].title }}</h2>
             <p>{{ scenes[activeScene].narration }}</p>
           </div>
-          <div class="guide-controls">
+          <div v-if="!isVideoMode" class="guide-controls">
             <button class="play-control" type="button" :aria-label="isPlaying ? '暂停' : '播放'" @click="togglePlayback">
               <i :class="{ paused: !isPlaying }"></i>
               <span>{{ isPlaying ? '暂停' : '播放' }}</span>
@@ -100,7 +104,7 @@ onBeforeUnmount(() => {
             </div>
             <button class="guide-plan" type="button" @click="emit('plan', resource)">加入规划 <span>→</span></button>
           </div>
-          <div class="guide-progress"><i :style="{ width: `${progress}%` }"></i></div>
+          <div v-if="!isVideoMode" class="guide-progress"><i :style="{ width: `${progress}%` }"></i></div>
         </div>
         <aside>
           <span>NOW SHOWING</span>
