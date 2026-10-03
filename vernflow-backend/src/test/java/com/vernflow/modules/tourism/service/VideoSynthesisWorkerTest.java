@@ -37,6 +37,7 @@ class VideoSynthesisWorkerTest {
     private final MerchantProductService productService = mock(MerchantProductService.class);
     private final VideoPromptBuilder promptBuilder = mock(VideoPromptBuilder.class);
     private final AiVideoSynthesisClient synthesisClient = mock(AiVideoSynthesisClient.class);
+    private final AttractionPhotoService attractionPhotoService = mock(AttractionPhotoService.class);
 
     private VideoSynthesisWorker worker;
 
@@ -44,9 +45,10 @@ class VideoSynthesisWorkerTest {
     void setUp() {
         worker = new VideoSynthesisWorker(
                 taskRepository, resourceRepository, productService, promptBuilder, synthesisClient,
-                new StorageProperties(null, null, mediaDir)
+                attractionPhotoService, new StorageProperties(null, null, mediaDir)
         );
         when(taskRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(attractionPhotoService.resolvePhotoBase64(any())).thenReturn(List.of());
     }
 
     @Test
@@ -70,6 +72,23 @@ class VideoSynthesisWorkerTest {
                         && request.facts().contains("开放时间08:00-17:00")
                         && request.images().equals(List.of("aW1nMQ=="))
                         && request.aspectRatio().equals("16:9")
+        ));
+    }
+
+    @Test
+    void prefersAmapPhotosOverFallbackImages() {
+        VideoGenerationTask task = pendingLocalTask(5L);
+        TourismResource resource = publishedResource();
+        when(taskRepository.findById(5L)).thenReturn(Optional.of(task));
+        when(resourceRepository.findById(1L)).thenReturn(Optional.of(resource));
+        when(attractionPhotoService.resolvePhotoBase64(resource)).thenReturn(List.of("cmVhbHBob3Rv"));
+        when(synthesisClient.synthesizeVideo(any())).thenReturn(new byte[]{1});
+
+        worker.processTask(5L, List.of("ZmFsbGJhY2s="));
+
+        assertThat(task.getStatus()).isEqualTo(VideoGenerationTask.Status.SUCCEEDED);
+        verify(synthesisClient).synthesizeVideo(argThat(request ->
+                request.images().equals(List.of("cmVhbHBob3Rv"))
         ));
     }
 

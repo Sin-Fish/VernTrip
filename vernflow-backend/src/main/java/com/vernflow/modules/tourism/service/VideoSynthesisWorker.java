@@ -31,6 +31,7 @@ public class VideoSynthesisWorker {
     private final MerchantProductService productService;
     private final VideoPromptBuilder promptBuilder;
     private final AiVideoSynthesisClient synthesisClient;
+    private final AttractionPhotoService attractionPhotoService;
     private final StorageProperties storageProperties;
 
     public VideoSynthesisWorker(
@@ -39,6 +40,7 @@ public class VideoSynthesisWorker {
             MerchantProductService productService,
             VideoPromptBuilder promptBuilder,
             AiVideoSynthesisClient synthesisClient,
+            AttractionPhotoService attractionPhotoService,
             StorageProperties storageProperties
     ) {
         this.taskRepository = taskRepository;
@@ -46,6 +48,7 @@ public class VideoSynthesisWorker {
         this.productService = productService;
         this.promptBuilder = promptBuilder;
         this.synthesisClient = synthesisClient;
+        this.attractionPhotoService = attractionPhotoService;
         this.storageProperties = storageProperties;
     }
 
@@ -78,12 +81,15 @@ public class VideoSynthesisWorker {
         if (task.getResourceId() != null) {
             TourismResource resource = resourceRepository.findById(task.getResourceId())
                     .orElseThrow(() -> new IllegalStateException("文旅资源不存在。"));
+            // 优先使用高德 POI 实景照片（真实影像），无照片时兜底前端传入的素材。
+            List<String> photos = attractionPhotoService.resolvePhotoBase64(resource);
+            List<String> resolvedImages = photos.isEmpty() ? images : photos;
             return new AiVideoSynthesisClient.SynthesisRequest(
                     resource.getName(),
                     resource.getCity(),
                     resource.getCategory().name(),
                     promptBuilder.buildFactsText(resource),
-                    images,
+                    resolvedImages,
                     task.getAspectRatio()
             );
         }
